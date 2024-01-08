@@ -28,6 +28,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     };
     return switch (instruction) {
         OpCode.op_constant => constantInstruction("OP_CONSTANT", chunk, offset),
+        OpCode.op_constant_long => constantInstructionLong("OP_CONSTANT_LONG", chunk, offset),
         OpCode.op_return => simpleInstruction("OP_RETURN", offset),
     };
 }
@@ -38,6 +39,13 @@ fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     printValue(chunk.constIdx(constant));
     std.debug.print("'\n", .{});
     return offset + 2;
+}
+fn constantInstructionLong(name: []const u8, chunk: *Chunk, offset: usize) usize {
+    const constant: u24 = @bitCast([3]u8{chunk.idx(offset+1), chunk.idx(offset+2), chunk.idx(offset+3)});
+    std.debug.print("{s:<16} {d:>4} '", .{name, constant});
+    printValue(chunk.constIdx(constant));
+    std.debug.print("'\n", .{});
+    return offset + 4;
 }
 
 fn simpleInstruction(name: []const u8, offset: usize) usize {

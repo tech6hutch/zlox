@@ -12,6 +12,7 @@ const PackedLineNum = if (PACK_LINE_NUMBERS) struct {
 
 pub const OpCode = enum {
     op_constant,
+    op_constant_long,
     op_return,
 };
 
@@ -27,36 +28,57 @@ pub const Chunk = struct {
             .constants = ValueArray.init(allocator),
         };
     }
+    pub fn free(self: *Chunk) void {
+        self.code.deinit();
+        self.lines.deinit();
+        self.constants.deinit();
+    }
+
     pub fn write_byte(self: *Chunk, byte: u8, line: usize) Allocator.Error!void {
         try self.code.append(byte);
+        try self.append_line(line, 1);
+    }
+    pub fn write_bytes(self: *Chunk, bytes: []const u8, line: usize) Allocator.Error!void {
+        try self.code.appendSlice(bytes);
+        try append_line(self, line, bytes.len);
+    }
+    fn append_line(self: *Chunk, line: usize, times: usize) Allocator.Error!void {
         if (PACK_LINE_NUMBERS) {
-            var last =
-                if (self.lines.items.len > 0) &self.lines.items[self.lines.items.len - 1]
-                else null;
-            if (last != null and last.?.line_num == line) {
-                last.?.repeated_times +%= 1;
-                if (last.?.repeated_times == 0) std.debug.panic(
-                    "can't compile more than {d} instructions per line",
-                    .{U16_MAX});
-            } else {
-                const next = PackedLineNum {
+            var line_info: *PackedLineNum = blk: {
+                if (self.lines.items.len > 0) {
+                    const prev_line_info = &self.lines.items[self.lines.items.len - 1];
+                    if (prev_line_info.line_num == line) {
+                        break :blk prev_line_info;
+                    }
+                }
+                const new_line_info = PackedLineNum{
                     .line_num = u16_cast(line) catch std.debug.panic(
                         "can't handle more than {d} lines",
                         .{U16_MAX}),
                 };
-                try self.lines.append(next);
-            }
+                try self.lines.append(new_line_info);
+                break :blk &self.lines.items[self.lines.items.len - 1];
+            };
+            line_info.repeated_times = u16_cast(line_info.repeated_times + times) catch std.debug.panic(
+                "can't compile more than {d} instructions per line",
+                .{U16_MAX});
         } else {
-            try self.lines.append(line);
+            try self.lines.appendNTimes(line, times);
         }
     }
     pub fn write_op_code(self: *Chunk, op_code: OpCode, line: usize) Allocator.Error!void {
         try self.write_byte(@intFromEnum(op_code), line);
     }
-    pub fn free(self: *Chunk) void {
-        self.code.deinit();
-        self.lines.deinit();
-        self.constants.deinit();
+    pub fn write_const(self: *Chunk, value: Value, line: usize) Allocator.Error!void {
+        const constant: u24 = try self.addConst(value);
+        if (constant < 256) {
+            try self.write_op_code(OpCode.op_constant, line);
+            try self.write_byte(@intCast(constant), line);
+        } else {
+            const constant_bytes: [3]u8 = @bitCast(constant);
+            try self.write_op_code(OpCode.op_constant_long, line);
+            try self.write_bytes(&constant_bytes, line);
+        }
     }
 
     pub fn get_line(self: *Chunk, code_idx: usize) usize {
@@ -78,18 +100,23 @@ pub const Chunk = struct {
     pub inline fn idx(self: *Chunk, i: usize) u8 {
         return self.code.items[i];
     }
+    pub inline fn idx_array(self: *Chunk, start: usize, comptime N: usize) []const u8 {
+        return self.code.items[start..start+N];
+    }
     pub inline fn count(self: *Chunk) usize {
         return self.code.items.len;
     }
     pub inline fn constIdx(self: *Chunk, i: usize) Value {
         return self.constants.items[i];
     }
-    pub inline fn addConst(self: *Chunk, value: Value) Allocator.Error!u8 {
+    pub inline fn addConst(self: *Chunk, value: Value) Allocator.Error!u24 {
         try self.constants.append(value);
-        if (self.constants.items.len > 256) {
-            @panic("over 256 constants is unsupported");
+        const i = self.constants.items.len - 1;
+        const i_u24: u24 = @intCast(i);
+        if (i_u24 != i) {
+            std.debug.panic("use fewer constants (less than 2^24)", .{});
         }
-        return @intCast(self.constants.items.len - 1);
+        return i_u24;
     }
 };
 
