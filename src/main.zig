@@ -16,7 +16,7 @@ pub fn main() !void {
 
     try chunk.write_op_code(Op.@"return", 123);
 
-    dbg.disassembleChunk(&chunk, "test chunk");
+    // dbg.disassembleChunk(&chunk, "test chunk");
     try vm.interpret(&chunk);
 
     vm.deinit();

@@ -1,4 +1,6 @@
 const std = @import("std");
+const common = @import("./common.zig");
+const dbg = @import("./debug.zig");
 const Chunk = @import("./Chunk.zig");
 const values = @import("./values.zig");
 const Value = values.Value;
@@ -36,6 +38,12 @@ pub fn interpret(self: *Self, chunk: *Chunk) InterpretError!void {
 fn run(self: *Self) InterpretError!void {
     const Op = Chunk.OpCode;
     while (true) {
+        if (common.DEBUG_TRACE_EXECUTION) {
+            _ = dbg.disassembleInstruction(
+                self.chunk.?,
+                @intFromPtr(self.ip.?) - @intFromPtr(self.chunk.?.code.items.ptr));
+        }
+
         const instruction = self.readByte();
         switch (instruction) {
             Op.constant.int(), Op.constant_long.int() => {
