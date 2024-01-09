@@ -28,7 +28,7 @@ pub const VM = struct {
 
     pub fn interpret(self: *VM, chunk: *Chunk) InterpretError!void {
         self.chunk = chunk;
-        self.ip = @ptrCast(chunk.code.items);
+        self.ip = chunk.code.items.ptr;
         return self.run();
     }
 
