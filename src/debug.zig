@@ -1,7 +1,8 @@
 const std = @import("std");
-const Chunk = @import("./chunk.zig").Chunk;
-const OpCode = @import("./chunk.zig").OpCode;
-const printValue = @import("./value.zig").printValue;
+const Chunk = @import("./Chunk.zig");
+const OpCode = Chunk.OpCode;
+const values = @import("./values.zig");
+const printValue = values.print;
 
 pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
@@ -27,9 +28,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         return offset + 1;
     };
     return switch (instruction) {
-        OpCode.op_constant => constantInstruction("OP_CONSTANT", chunk, offset),
-        OpCode.op_constant_long => constantInstructionLong("OP_CONSTANT_LONG", chunk, offset),
-        OpCode.op_return => simpleInstruction("OP_RETURN", offset),
+        .constant => constantInstruction("OP_CONSTANT", chunk, offset),
+        .constant_long => constantInstructionLong("OP_CONSTANT_LONG", chunk, offset),
+        .@"return" => simpleInstruction("OP_RETURN", offset),
     };
 }
 
