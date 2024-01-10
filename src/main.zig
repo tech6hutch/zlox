@@ -14,6 +14,11 @@ pub fn main() !void {
     var chunk = Chunk.init(allocator);
 
     try chunk.write_const(1.2, 123);
+    try chunk.write_const(3.4, 123);
+    try chunk.write_op_code(Op.add, 123);
+
+    try chunk.write_const(5.6, 123);
+    try chunk.write_op_code(Op.divide, 123);
     try chunk.write_op_code(Op.negate, 123);
 
     try chunk.write_op_code(Op.@"return", 123);

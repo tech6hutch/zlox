@@ -60,6 +60,10 @@ fn run(self: *Self) InterpretError!void {
                 const constant: Value = self.readConst();
                 self.push(constant);
             },
+            Op.add.int() => self.binaryOp(.add),
+            Op.subtract.int() => self.binaryOp(.subtract),
+            Op.multiply.int() => self.binaryOp(.multiply),
+            Op.divide.int() => self.binaryOp(.divide),
             Op.negate.int() => self.push(-self.pop()),
             Op.@"return".int() => {
                 printValue(self.pop());
@@ -79,6 +83,22 @@ inline fn readByte(self: *Self) u8 {
 }
 inline fn readConst(self: *Self) Value {
     return self.chunk.?.constIdx(self.readByte());
+}
+const BinaryOp = enum {
+    add,
+    subtract,
+    multiply,
+    divide,
+};
+inline fn binaryOp(self: *Self, comptime op: BinaryOp) void {
+    const b = self.pop();
+    const a = self.pop();
+    self.push(switch (op) {
+        .add      => a + b,
+        .subtract => a - b,
+        .multiply => a * b,
+        .divide   => a / b,
+    });
 }
 
 fn push(self: *Self, value: Value) void {
