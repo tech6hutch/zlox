@@ -1,0 +1,1 @@
+- optimize Chunk.getLine (and maybe the place(s) it's used)
