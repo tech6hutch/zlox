@@ -1,4 +1,7 @@
+//! Don't move a VM after init'ing it, or its pointer fields will break.
+
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const common = @import("./common.zig");
 const dbg = @import("./debug.zig");
 const Chunk = @import("./Chunk.zig");
@@ -15,15 +18,14 @@ ip: ?[*]u8,
 stack: [STACK_MAX]Value,
 stack_top: ?[*]Value,
 
-pub fn init() Self {
-    var vm: Self = .{
-        .chunk = null,
-        .ip = null,
-        .stack = undefined,
-        .stack_top = null,
-    };
-    vm.resetStack();
-    return vm;
+pub fn init(self: *Self) void {
+    self.chunk = null;
+    self.ip = null;
+    self.stack_top = null;
+    self.resetStack();
+}
+fn resetStack(self: *Self) void {
+    self.stack_top = self.stack[0..];
 }
 pub fn deinit(self: *Self) void {
     _ = self;
@@ -39,6 +41,14 @@ fn run(self: *Self) InterpretError!void {
     const Op = Chunk.OpCode;
     while (true) {
         if (common.DEBUG_TRACE_EXECUTION) {
+            std.debug.print("          ", .{});
+            var slot: [*]Value = &self.stack;
+            while (@intFromPtr(slot) < @intFromPtr(self.stack_top)) : (slot += 1) {
+                std.debug.print("[ ", .{});
+                printValue(slot[0]);
+                std.debug.print(" ]", .{});
+            }
+            std.debug.print("\n", .{});
             _ = dbg.disassembleInstruction(
                 self.chunk.?,
                 @intFromPtr(self.ip.?) - @intFromPtr(self.chunk.?.code.items.ptr));
@@ -47,11 +57,12 @@ fn run(self: *Self) InterpretError!void {
         const instruction = self.readByte();
         switch (instruction) {
             Op.constant.int(), Op.constant_long.int() => {
-                const constant = self.readConst();
-                printValue(constant);
-                std.debug.print("\n", .{});
+                const constant: Value = self.readConst();
+                self.push(constant);
             },
             Op.@"return".int() => {
+                printValue(self.pop());
+                std.debug.print("\n", .{});
                 return;
             },
             else => {
@@ -69,8 +80,13 @@ inline fn readConst(self: *Self) Value {
     return self.chunk.?.constIdx(self.readByte());
 }
 
-fn resetStack(self: *Self) void {
-    self.stack_top = self.stack[0..];
+fn push(self: *Self, value: Value) void {
+    self.stack_top.?[0] = value;
+    self.stack_top.? += 1;
+}
+fn pop(self: *Self) Value {
+    self.stack_top.? -= 1;
+    return self.stack_top.?[0];
 }
 
 pub const InterpretError = error{ CompileError, RuntimeError };

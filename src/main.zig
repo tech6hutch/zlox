@@ -8,7 +8,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var vm = Vm.init();
+    var vm: Vm = undefined;
+    vm.init();
 
     var chunk = Chunk.init(allocator);
 
