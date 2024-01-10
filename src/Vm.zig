@@ -60,6 +60,7 @@ fn run(self: *Self) InterpretError!void {
                 const constant: Value = self.readConst();
                 self.push(constant);
             },
+            Op.negate.int() => self.push(-self.pop()),
             Op.@"return".int() => {
                 printValue(self.pop());
                 std.debug.print("\n", .{});
