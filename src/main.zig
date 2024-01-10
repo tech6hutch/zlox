@@ -1,7 +1,6 @@
 const std = @import("std");
 const Chunk = @import("./Chunk.zig");
 const Op = Chunk.OpCode;
-const dbg = @import("./debug.zig");
 const Vm = @import("./Vm.zig");
 
 pub fn main() !void {
@@ -23,8 +22,9 @@ pub fn main() !void {
 
     try chunk.write_op_code(Op.@"return", 123);
 
-    // dbg.disassembleChunk(&chunk, "test chunk");
+    var timer = try std.time.Timer.start();
     try vm.interpret(&chunk);
+    std.debug.print("Interpreting took {d}nanosecs", .{timer.read()});
 
     vm.deinit();
     chunk.deinit();

@@ -64,7 +64,7 @@ fn run(self: *Self) InterpretError!void {
             Op.subtract.int() => self.binaryOp(.subtract),
             Op.multiply.int() => self.binaryOp(.multiply),
             Op.divide.int() => self.binaryOp(.divide),
-            Op.negate.int() => self.push(-self.pop()),
+            Op.negate.int() => self.peek().* *= -1,
             Op.@"return".int() => {
                 printValue(self.pop());
                 std.debug.print("\n", .{});
@@ -92,13 +92,12 @@ const BinaryOp = enum {
 };
 inline fn binaryOp(self: *Self, comptime op: BinaryOp) void {
     const b = self.pop();
-    const a = self.pop();
-    self.push(switch (op) {
-        .add      => a + b,
-        .subtract => a - b,
-        .multiply => a * b,
-        .divide   => a / b,
-    });
+    switch (op) {
+        .add      => self.peek().* += b,
+        .subtract => self.peek().* -= b,
+        .multiply => self.peek().* *= b,
+        .divide   => self.peek().* /= b,
+    }
 }
 
 fn push(self: *Self, value: Value) void {
@@ -108,6 +107,9 @@ fn push(self: *Self, value: Value) void {
 fn pop(self: *Self) Value {
     self.stack_top.? -= 1;
     return self.stack_top.?[0];
+}
+inline fn peek(self: *Self) *Value {
+    return &(self.stack_top.? - 1)[0];
 }
 
 pub const InterpretError = error{ CompileError, RuntimeError };
