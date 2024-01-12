@@ -8,6 +8,7 @@ const Chunk = @import("./Chunk.zig");
 const values = @import("./values.zig");
 const Value = values.Value;
 const printValue = values.print;
+const compiler = @import("./compiler.zig");
 
 const STACK_MAX: usize = 256;
 
@@ -31,10 +32,9 @@ pub fn deinit(self: *Self) void {
     _ = self;
 }
 
-pub fn interpret(self: *Self, chunk: *Chunk) InterpretError!void {
-    self.chunk = chunk;
-    self.ip = chunk.code.items.ptr;
-    return self.run();
+pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
+    _ = self;
+    compiler.compile(source);
 }
 
 fn run(self: *Self) InterpretError!void {
