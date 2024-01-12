@@ -18,12 +18,14 @@ chunk: ?*Chunk,
 ip: ?[*]u8,
 stack: [STACK_MAX]Value,
 stack_top: ?[*]Value,
+allocator: Allocator,
 
-pub fn init(self: *Self) void {
+pub fn init(self: *Self, allocator: Allocator) void {
     self.chunk = null;
     self.ip = null;
     self.stack_top = null;
     self.resetStack();
+	self.allocator = allocator;
 }
 fn resetStack(self: *Self) void {
     self.stack_top = self.stack[0..];
@@ -33,8 +35,20 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
-    _ = self;
-    compiler.compile(source);
+	var chunk = Chunk.init(self.allocator);
+
+	if (!compiler.compile(source, chunk)) {
+		chunk.deinit();
+		return .CompileError;
+	}
+
+	self.chunk = chunk;
+	vm.ip = chunk.code.items[0];
+
+	const result = self.run();
+
+	chunk.deinit();
+	return result;
 }
 
 fn run(self: *Self) InterpretError!void {

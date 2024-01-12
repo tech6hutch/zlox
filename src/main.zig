@@ -11,7 +11,7 @@ const allocator = gpa.allocator();
 var vm: Vm = undefined;
 
 pub fn main() !void {
-    vm.init();
+    vm.init(allocator);
 
     const args = try std.process.argsAlloc(allocator);
     switch (args.len) {

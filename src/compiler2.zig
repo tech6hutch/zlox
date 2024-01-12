@@ -1,10 +1,18 @@
 const std = @import("std");
 const Scanner = @import("./Scanner.zig");
+const Chunk = @import("./Chunk.zig");
 
-var scanner: Scanner = undefined;
+const Compiler = struct {
+	scanner: Scanner,
+};
 
-pub fn compile(source: [*:0]const u8) void {
+pub fn compile(source: [*:0]const u8, chunk: *Chunk) void {
+	var compiler = Compiler{
+		.scanner = Scanner.init(source),
+	};
     scanner = Scanner.init(source);
+	_ = scanner.advance();
+	expression();
     var line: usize = 0;
     while (true) {
         const token = scanner.scanToken();
