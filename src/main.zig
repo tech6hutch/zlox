@@ -3,29 +3,52 @@ const Chunk = @import("./Chunk.zig");
 const Op = Chunk.OpCode;
 const Vm = @import("./Vm.zig");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
 
+pub fn main() !void {
     var vm: Vm = undefined;
     vm.init();
 
-    var chunk = Chunk.init(allocator);
-
-    try chunk.write_const(1.2, 123);
-    try chunk.write_const(3.4, 123);
-    try chunk.write_op_code(Op.add, 123);
-
-    try chunk.write_const(5.6, 123);
-    try chunk.write_op_code(Op.divide, 123);
-    try chunk.write_op_code(Op.negate, 123);
-
-    try chunk.write_op_code(Op.@"return", 123);
-
-    var timer = try std.time.Timer.start();
-    try vm.interpret(&chunk);
-    std.debug.print("Interpreting took {d}nanosecs", .{timer.read()});
+    var args = std.process.argsAlloc(allocator);
+    switch (args.len()) {
+        1 => repl(),
+        2 => runFile(args[1]),
+        else => {
+            const stderr = std.io.getStdErr().writer();
+            stderr.print("Usage: zlox [path]\n", .{});
+            std.process.exit(64);
+        }
+    }
 
     vm.deinit();
     chunk.deinit();
+}
+
+fn repl() void {
+	var stdout = std.io.getStdOut().writer();
+	var stdin = std.io.getStdIn().reader();
+	var line_buf: [1024]u8 = undefined;
+	while (true) {
+		stdout.print("> ", .{});
+
+		const line = try stdin.readUntilDelimiter(&line_buf, "\n");
+		if (line.len() == 0) {
+			stdout.print("\n", .{});
+			break;
+		}
+
+		interpret(line);
+	}
+}
+
+fn runFile(path: *const u8) void {
+	const source = readFile(path);
+	const result = interpret(source);
+	// todo: free(source)
+
+	result catch |e| switch (e) {
+		.CompileError => std.process.exit(65),
+		.RuntimeError => std.process.exit(70),
+	};
 }
