@@ -32,15 +32,15 @@ pub fn deinit(self: *Chunk) void {
     self.constants.deinit();
 }
 
-pub fn write_byte(self: *Chunk, byte: u8, line: usize) Allocator.Error!void {
+pub fn writeByte(self: *Chunk, byte: u8, line: usize) Allocator.Error!void {
     try self.code.append(byte);
-    try self.append_line(line, 1);
+    try self.appendLine(line, 1);
 }
-pub fn write_bytes(self: *Chunk, bytes: []const u8, line: usize) Allocator.Error!void {
+pub fn writeBytes(self: *Chunk, bytes: []const u8, line: usize) Allocator.Error!void {
     try self.code.appendSlice(bytes);
-    try append_line(self, line, bytes.len);
+    try self.appendLine(line, bytes.len);
 }
-fn append_line(self: *Chunk, line: usize, times: usize) Allocator.Error!void {
+fn appendLine(self: *Chunk, line: usize, times: usize) Allocator.Error!void {
     if (PACK_LINE_NUMBERS) {
         var line_info: *PackedLineNum = blk: {
             if (self.lines.items.len > 0) {
@@ -64,22 +64,22 @@ fn append_line(self: *Chunk, line: usize, times: usize) Allocator.Error!void {
         try self.lines.appendNTimes(line, times);
     }
 }
-pub fn write_op_code(self: *Chunk, op_code: OpCode, line: usize) Allocator.Error!void {
-    try self.write_byte(@intFromEnum(op_code), line);
+pub fn writeOpCode(self: *Chunk, op_code: OpCode, line: usize) Allocator.Error!void {
+    try self.writeByte(@intFromEnum(op_code), line);
 }
-pub fn write_const(self: *Chunk, value: Value, line: usize) Allocator.Error!void {
+pub fn writeConst(self: *Chunk, value: Value, line: usize) Allocator.Error!void {
     const constant: u24 = try self.addConst(value);
     if (constant < 256) {
-        try self.write_op_code(Op.constant, line);
-        try self.write_byte(@intCast(constant), line);
+        try self.writeOpCode(Op.constant, line);
+        try self.writeByte(@intCast(constant), line);
     } else {
         const constant_bytes: [3]u8 = @bitCast(constant);
-        try self.write_op_code(Op.constant_long, line);
-        try self.write_bytes(&constant_bytes, line);
+        try self.writeOpCode(Op.constant_long, line);
+        try self.writeBytes(&constant_bytes, line);
     }
 }
 
-pub fn get_line(self: *Chunk, code_idx: usize) usize {
+pub fn getLine(self: *Chunk, code_idx: usize) usize {
     if (PACK_LINE_NUMBERS) {
         var i: usize = 0;
         for (self.lines.items) |line| {
@@ -98,7 +98,7 @@ pub fn get_line(self: *Chunk, code_idx: usize) usize {
 pub inline fn idx(self: *Chunk, i: usize) u8 {
     return self.code.items[i];
 }
-pub inline fn idx_array(self: *Chunk, start: usize, comptime N: usize) []const u8 {
+pub inline fn idxArray(self: *Chunk, start: usize, comptime N: usize) []const u8 {
     return self.code.items[start..start+N];
 }
 pub inline fn count(self: *Chunk) usize {

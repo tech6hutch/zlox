@@ -15,8 +15,8 @@ pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
 
 pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     std.debug.print("{d:0>4} ", .{offset});
-    const line = chunk.get_line(offset);
-    if (offset > 0 and line == chunk.get_line(offset - 1)) {
+    const line = chunk.getLine(offset);
+    if (offset > 0 and line == chunk.getLine(offset - 1)) {
         std.debug.print("   | ", .{});
     } else {
         std.debug.print("{d:>4} ", .{line});

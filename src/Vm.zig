@@ -37,13 +37,13 @@ pub fn deinit(self: *Self) void {
 pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
 	var chunk = Chunk.init(self.allocator);
 
-	if (!compiler.compile(source, chunk)) {
+	if (!compiler.compile(source, &chunk)) {
 		chunk.deinit();
-		return .CompileError;
+		return error.CompileError;
 	}
 
-	self.chunk = chunk;
-	vm.ip = chunk.code.items[0];
+	self.chunk = &chunk;
+	self.ip = chunk.code.items.ptr;
 
 	const result = self.run();
 
