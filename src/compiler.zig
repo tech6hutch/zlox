@@ -15,6 +15,10 @@ var scanner: Scanner = undefined;
 pub fn compile(source: [*:0]const u8, chunk: *Chunk) bool {
 	scanner = Scanner.init(source);
 	compiling_chunk = chunk;
+
+	parser.had_error = false;
+	parser.panic_mode = false;
+
 	advance();
 	expression();
 	consume(.eof, "Expect end of expression.");
