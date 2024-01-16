@@ -13,24 +13,24 @@ const dbg = @import("./debug.zig");
 var scanner: Scanner = undefined;
 
 pub fn compile(source: [*:0]const u8, chunk: *Chunk) bool {
-	scanner = Scanner.init(source);
-	compiling_chunk = chunk;
+    scanner = Scanner.init(source);
+    compiling_chunk = chunk;
 
-	parser.had_error = false;
-	parser.panic_mode = false;
+    parser.had_error = false;
+    parser.panic_mode = false;
 
-	advance();
-	expression();
-	consume(.eof, "Expect end of expression.");
-	endCompiler();
-	return !parser.had_error;
+    advance();
+    expression();
+    consume(.eof, "Expect end of expression.");
+    endCompiler();
+    return !parser.had_error;
 }
 
 const Parser = struct {
-	current: Token,
-	previous: Token,
-	had_error: bool = false,
-	panic_mode: bool = false,
+    current: Token,
+    previous: Token,
+    had_error: bool = false,
+    panic_mode: bool = false,
 };
 
 const Precedence = enum {
@@ -50,156 +50,156 @@ const Precedence = enum {
 const ParseFn = *const fn() void;
 
 const ParseRule = struct {
-	prefix: ?ParseFn,
-	infix: ?ParseFn,
-	precedence: Precedence,
-	fn init(pre: ?ParseFn, in: ?ParseFn, prec: Precedence) ParseRule {
-		return .{
-			.prefix = pre,
-			.infix = in,
-			.precedence = prec,
-		};
-	}
+    prefix: ?ParseFn,
+    infix: ?ParseFn,
+    precedence: Precedence,
+    fn init(pre: ?ParseFn, in: ?ParseFn, prec: Precedence) ParseRule {
+        return .{
+            .prefix = pre,
+            .infix = in,
+            .precedence = prec,
+        };
+    }
 };
 
 var parser = Parser{
-	.previous = undefined,
-	.current = undefined,
+    .previous = undefined,
+    .current = undefined,
 };
 var compiling_chunk: ?*Chunk = null;
 fn currentChunk() *Chunk {
-	return compiling_chunk.?;
+    return compiling_chunk.?;
 }
 
 fn err(message: []const u8) void {
-	errorAt(&parser.previous, message);
+    errorAt(&parser.previous, message);
 }
 fn errorAtCurrent(message: []const u8) void {
-	errorAt(&parser.current, message);
+    errorAt(&parser.current, message);
 }
 fn errorAt(token: *Token, message: []const u8) void {
-	if (parser.panic_mode) return;
-	parser.panic_mode = true;
-	var stderr = std.io.getStdErr().writer();
-	stderr.print("[line {d}] Error", .{token.line}) catch {};
-	if (token.kind == .eof) {
-		stderr.print(" at end", .{}) catch {};
-	} else if (token.kind == .err) {
-		// Nothing.
-	} else {
-		stderr.print(" at '{s}'", .{token.lexeme}) catch {};
-	}
-	stderr.print(": {s}\n", .{message}) catch {};
-	parser.had_error = true;
+    if (parser.panic_mode) return;
+    parser.panic_mode = true;
+    var stderr = std.io.getStdErr().writer();
+    stderr.print("[line {d}] Error", .{token.line}) catch {};
+    if (token.kind == .eof) {
+        stderr.print(" at end", .{}) catch {};
+    } else if (token.kind == .err) {
+        // Nothing.
+    } else {
+        stderr.print(" at '{s}'", .{token.lexeme}) catch {};
+    }
+    stderr.print(": {s}\n", .{message}) catch {};
+    parser.had_error = true;
 }
 
 fn advance() void {
-	parser.previous = parser.current;
+    parser.previous = parser.current;
 
-	while (true) {
-		parser.current = scanner.scanToken();
-		if (parser.current.kind != .err) break;
+    while (true) {
+        parser.current = scanner.scanToken();
+        if (parser.current.kind != .err) break;
 
-		errorAtCurrent(parser.current.lexeme);
-	}
+        errorAtCurrent(parser.current.lexeme);
+    }
 }
 
 fn consume(kind: TokenKind, message: []const u8) void {
-	if (parser.current.kind == kind) {
-		advance();
-		return;
-	}
+    if (parser.current.kind == kind) {
+        advance();
+        return;
+    }
 
-	errorAtCurrent(message);
+    errorAtCurrent(message);
 }
 
 fn emitByte(byte: u8) void {
-	currentChunk().writeByte(byte, parser.previous.line) catch |e| {
-		switch (e) {
-			error.OutOfMemory => @panic(
-				"out of memory while adding constant"),
-		}
-	};
+    currentChunk().writeByte(byte, parser.previous.line) catch |e| {
+        switch (e) {
+            error.OutOfMemory => @panic(
+                "out of memory while adding constant"),
+        }
+    };
 }
 
 fn emitBytes(byte1: Op, byte2: u8) void {
-	emitByte(@intFromEnum(byte1));
-	emitByte(byte2);
+    emitByte(@intFromEnum(byte1));
+    emitByte(byte2);
 }
 
 fn emitReturn() void {
-	emitByte(Op.@"return".int());
+    emitByte(Op.@"return".int());
 }
 
 fn makeConstant(value: Value) u8 {
-	const constant = currentChunk().addConst(value) catch |e| {
-		switch (e) {
-			error.OutOfMemory => @panic(
-				"out of memory while adding constant"),
-		}
-	};
-	if (constant > std.math.maxInt(u8)) {
-		err("Too many constants in one chunk.");
-		return 0;
-	}
+    const constant = currentChunk().addConst(value) catch |e| {
+        switch (e) {
+            error.OutOfMemory => @panic(
+                "out of memory while adding constant"),
+        }
+    };
+    if (constant > std.math.maxInt(u8)) {
+        err("Too many constants in one chunk.");
+        return 0;
+    }
 
-	return @intCast(constant);
+    return @intCast(constant);
 }
 
 fn emitConstant(value: Value) void {
-	emitBytes(Op.constant, makeConstant(value));
+    emitBytes(Op.constant, makeConstant(value));
 }
 
 fn endCompiler() void {
-	emitReturn();
-	if (common.DEBUG_PRINT_CODE and !parser.had_error) {
-		dbg.disassembleChunk(currentChunk(), "code");
-	}
+    emitReturn();
+    if (common.DEBUG_PRINT_CODE and !parser.had_error) {
+        dbg.disassembleChunk(currentChunk(), "code");
+    }
 }
 
 fn binary() void {
-	const operatorKind = parser.previous.kind;
-	const rule = getRule(operatorKind);
-	parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
-	switch (operatorKind) {
-		.plus =>  emitByte(Op.add.int()),
-		.minus => emitByte(Op.subtract.int()),
-		.star =>  emitByte(Op.multiply.int()),
-		.slash => emitByte(Op.divide.int()),
-		else => unreachable
-	}
+    const operatorKind = parser.previous.kind;
+    const rule = getRule(operatorKind);
+    parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
+    switch (operatorKind) {
+        .plus =>  emitByte(Op.add.int()),
+        .minus => emitByte(Op.subtract.int()),
+        .star =>  emitByte(Op.multiply.int()),
+        .slash => emitByte(Op.divide.int()),
+        else => unreachable
+    }
 }
 
 fn grouping() void {
-	expression();
-	consume(.right_paren, "Expect ')' after expression.");
+    expression();
+    consume(.right_paren, "Expect ')' after expression.");
 }
 
 fn expression() void {
-	parsePrecedence(.assignment);
+    parsePrecedence(.assignment);
 }
 
 fn number() void {
-	const value = std.fmt.parseFloat(f64, parser.previous.lexeme)
-		// The scanner should return a proper number.
-		catch unreachable;
-	emitConstant(.{ .number = value });
+    const value = std.fmt.parseFloat(f64, parser.previous.lexeme)
+        // The scanner should return a proper number.
+        catch unreachable;
+    emitConstant(.{ .number = value });
 }
 
 fn unary() void {
-	const operatorKind = parser.previous.kind;
-	// Compile the operand.
-	parsePrecedence(.unary);
-	// Emit the operator instruction.
-	switch (operatorKind) {
-		.minus => emitByte(Op.negate.int()),
-		else => unreachable
-	}
+    const operatorKind = parser.previous.kind;
+    // Compile the operand.
+    parsePrecedence(.unary);
+    // Emit the operator instruction.
+    switch (operatorKind) {
+        .minus => emitByte(Op.negate.int()),
+        else => unreachable
+    }
 }
 
 const rules: EnumArray(TokenKind, ParseRule) = def: {
-	var arr = EnumArray(TokenKind, ParseRule)
-		.initFill(ParseRule.init(null, null, .none));
+    var arr = EnumArray(TokenKind, ParseRule)
+        .initFill(ParseRule.init(null, null, .none));
     arr.set(.left_paren,    ParseRule.init(grouping, null,   .none));
     arr.set(.right_paren,   ParseRule.init(null,     null,   .none));
     arr.set(.left_brace,    ParseRule.init(null,     null,   .none));
@@ -240,24 +240,24 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.@"while",      ParseRule.init(null,     null,   .none));
     arr.set(.err,           ParseRule.init(null,     null,   .none));
     arr.set(.eof,           ParseRule.init(null,     null,   .none));
-	break :def arr;
+    break :def arr;
 };
 
 fn parsePrecedence(precedence: Precedence) void {
-	advance();
-	const prefixRule = getRule(parser.previous.kind).prefix;
-	if (prefixRule == null) {
-		err("Expect expression.");
-		return;
-	}
-	prefixRule.?();
-	while (@intFromEnum(precedence) <= @intFromEnum(getRule(parser.current.kind).precedence)) {
-		advance();
-		const infixRule = getRule(parser.previous.kind).infix;
-		infixRule.?();
-	}
+    advance();
+    const prefixRule = getRule(parser.previous.kind).prefix;
+    if (prefixRule == null) {
+        err("Expect expression.");
+        return;
+    }
+    prefixRule.?();
+    while (@intFromEnum(precedence) <= @intFromEnum(getRule(parser.current.kind).precedence)) {
+        advance();
+        const infixRule = getRule(parser.previous.kind).infix;
+        infixRule.?();
+    }
 }
 
 fn getRule(kind: TokenKind) *const ParseRule {
-	return &rules.get(kind);
+    return &rules.get(kind);
 }

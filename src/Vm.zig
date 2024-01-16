@@ -25,7 +25,7 @@ pub fn init(self: *Self, allocator: Allocator) void {
     self.ip = null;
     self.stack_top = null;
     self.resetStack();
-	self.allocator = allocator;
+    self.allocator = allocator;
 }
 pub fn deinit(self: *Self) void {
     _ = self;
@@ -44,20 +44,20 @@ fn runtimeError(self: *Self, comptime format: []const u8, args: anytype) void {
 }
 
 pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
-	var chunk = Chunk.init(self.allocator);
+    var chunk = Chunk.init(self.allocator);
 
-	if (!compiler.compile(source, &chunk)) {
-		chunk.deinit();
-		return error.CompileError;
-	}
+    if (!compiler.compile(source, &chunk)) {
+        chunk.deinit();
+        return error.CompileError;
+    }
 
-	self.chunk = &chunk;
-	self.ip = chunk.code.items.ptr;
+    self.chunk = &chunk;
+    self.ip = chunk.code.items.ptr;
 
-	const result = self.run();
+    const result = self.run();
 
-	chunk.deinit();
-	return result;
+    chunk.deinit();
+    return result;
 }
 
 fn run(self: *Self) InterpretError!void {
