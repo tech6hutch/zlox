@@ -81,6 +81,9 @@ fn run(self: *Self) InterpretError!void {
                 const constant: Value = self.readConst();
                 self.push(constant);
             },
+            Op.nil.int() => self.push(Value.nilVal()),
+            Op.true.int() => self.push(Value.boolVal(true)),
+            Op.false.int() => self.push(Value.boolVal(false)),
             Op.add.int() =>      try self.binaryOp(f64, Value.numberVal, .add),
             Op.subtract.int() => try self.binaryOp(f64, Value.numberVal, .subtract),
             Op.multiply.int() => try self.binaryOp(f64, Value.numberVal, .multiply),

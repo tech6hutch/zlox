@@ -35,5 +35,9 @@ pub const Value = union(ValueKind) {
 pub const Array = std.ArrayList(Value);
 
 pub fn print(value: Value) void {
-    std.debug.print("{d}", .{value.number});
+    switch (value) {
+        .bool => |b| std.debug.print("{s}", .{if (b) "true" else "false"}),
+        .nil => std.debug.print("nil", .{}),
+        .number => |n| std.debug.print("{d}", .{n}),
+    }
 }

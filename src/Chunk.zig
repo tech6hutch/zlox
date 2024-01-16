@@ -125,6 +125,9 @@ fn u16_cast(n: usize) error{TooDamnHigh}!u16 {
 pub const OpCode = enum(u8) {
     constant,
     constant_long,
+    nil,
+    true,
+    false,
     add,
     subtract,
     multiply,

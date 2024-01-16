@@ -30,6 +30,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     return switch (instruction) {
         .constant => constantInstruction("OP_CONSTANT", chunk, offset),
         .constant_long => constantInstructionLong("OP_CONSTANT_LONG", chunk, offset),
+        .nil => simpleInstruction("OP_NIL", offset),
+        .true => simpleInstruction("OP_TRUE", offset),
+        .false => simpleInstruction("OP_FALSE", offset),
         .add => simpleInstruction("OP_ADD", offset),
         .subtract => simpleInstruction("OP_SUBTRACT", offset),
         .multiply => simpleInstruction("OP_MULTIPLY", offset),

@@ -121,14 +121,16 @@ fn emitByte(byte: u8) void {
         }
     };
 }
-
+fn emitOp(byte: Op) void {
+    emitByte(@intFromEnum(byte));
+}
 fn emitBytes(byte1: Op, byte2: u8) void {
-    emitByte(@intFromEnum(byte1));
+    emitOp(byte1);
     emitByte(byte2);
 }
 
 fn emitReturn() void {
-    emitByte(Op.@"return".int());
+    emitOp(.@"return");
 }
 
 fn makeConstant(value: Value) u8 {
@@ -166,6 +168,15 @@ fn binary() void {
         .minus => emitByte(Op.subtract.int()),
         .star =>  emitByte(Op.multiply.int()),
         .slash => emitByte(Op.divide.int()),
+        else => unreachable
+    }
+}
+
+fn literal() void {
+    switch (parser.previous.kind) {
+        .false => emitOp(.false),
+        .nil => emitOp(.nil),
+        .true => emitOp(.true),
         else => unreachable
     }
 }
@@ -225,17 +236,17 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.@"and",        ParseRule.init(null,     null,   .none));
     arr.set(.class,         ParseRule.init(null,     null,   .none));
     arr.set(.@"else",       ParseRule.init(null,     null,   .none));
-    arr.set(.@"false",      ParseRule.init(null,     null,   .none));
+    arr.set(.false,         ParseRule.init(literal,  null,   .none));
     arr.set(.@"for",        ParseRule.init(null,     null,   .none));
     arr.set(.fun,           ParseRule.init(null,     null,   .none));
     arr.set(.@"if",         ParseRule.init(null,     null,   .none));
-    arr.set(.@"nil",        ParseRule.init(null,     null,   .none));
+    arr.set(.nil,           ParseRule.init(literal,  null,   .none));
     arr.set(.@"or",         ParseRule.init(null,     null,   .none));
     arr.set(.print,         ParseRule.init(null,     null,   .none));
     arr.set(.@"return",     ParseRule.init(null,     null,   .none));
     arr.set(.super,         ParseRule.init(null,     null,   .none));
     arr.set(.this,          ParseRule.init(null,     null,   .none));
-    arr.set(.@"true",       ParseRule.init(null,     null,   .none));
+    arr.set(.true,          ParseRule.init(literal,  null,   .none));
     arr.set(.@"var",        ParseRule.init(null,     null,   .none));
     arr.set(.@"while",      ParseRule.init(null,     null,   .none));
     arr.set(.err,           ParseRule.init(null,     null,   .none));
