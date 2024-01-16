@@ -88,6 +88,7 @@ fn run(self: *Self) InterpretError!void {
             Op.subtract.int() => try self.binaryOp(f64, Value.numberVal, .subtract),
             Op.multiply.int() => try self.binaryOp(f64, Value.numberVal, .multiply),
             Op.divide.int() =>   try self.binaryOp(f64, Value.numberVal, .divide),
+            Op.not.int() => self.push(Value.boolVal(isFalsey(self.pop()))),
             Op.negate.int() => {
                 switch (self.peek(0).*) {
                     .number => |*n| n.* *= -1,
@@ -157,6 +158,9 @@ fn pop(self: *Self) Value {
 inline fn peek(self: *Self, distance: isize) *Value {
     // Zig doesn't allow negative indices. Sad.
     return &(self.stack_top.? - 1 - distance)[0];
+}
+fn isFalsey(value: Value) bool {
+    return value.is_nil() or (value.is_bool() and !value.bool);
 }
 
 fn codeIndex(self: *Self) usize {

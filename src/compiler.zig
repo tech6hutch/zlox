@@ -203,7 +203,8 @@ fn unary() void {
     parsePrecedence(.unary);
     // Emit the operator instruction.
     switch (operatorKind) {
-        .minus => emitByte(Op.negate.int()),
+        .bang => emitOp(.not),
+        .minus => emitOp(.negate),
         else => unreachable
     }
 }
@@ -222,7 +223,7 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.semicolon,     ParseRule.init(null,     null,   .none));
     arr.set(.slash,         ParseRule.init(null,     binary, .factor));
     arr.set(.star,          ParseRule.init(null,     binary, .factor));
-    arr.set(.bang,          ParseRule.init(null,     null,   .none));
+    arr.set(.bang,          ParseRule.init(unary,    null,   .none));
     arr.set(.bang_equal,    ParseRule.init(null,     null,   .none));
     arr.set(.equal,         ParseRule.init(null,     null,   .none));
     arr.set(.equal_equal,   ParseRule.init(null,     null,   .none));
