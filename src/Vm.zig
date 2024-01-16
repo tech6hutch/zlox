@@ -8,6 +8,7 @@ const Chunk = @import("./Chunk.zig");
 const values = @import("./values.zig");
 const Value = values.Value;
 const printValue = values.print;
+const valuesEqual = values.equal;
 const compiler = @import("./compiler.zig");
 
 const STACK_MAX: usize = 256;
@@ -84,6 +85,13 @@ fn run(self: *Self) InterpretError!void {
             Op.nil.int() => self.push(Value.nilVal()),
             Op.true.int() => self.push(Value.boolVal(true)),
             Op.false.int() => self.push(Value.boolVal(false)),
+            Op.equal.int() => {
+                const b = self.pop();
+                const a = self.pop();
+                self.push(Value.boolVal(valuesEqual(a, b)));
+            },
+            Op.greater.int() =>  try self.binaryOp(bool, Value.boolVal, .greater),
+            Op.less.int() =>     try self.binaryOp(bool, Value.boolVal, .less),
             Op.add.int() =>      try self.binaryOp(f64, Value.numberVal, .add),
             Op.subtract.int() => try self.binaryOp(f64, Value.numberVal, .subtract),
             Op.multiply.int() => try self.binaryOp(f64, Value.numberVal, .multiply),
@@ -122,6 +130,8 @@ const BinaryOp = enum {
     subtract,
     multiply,
     divide,
+    greater,
+    less,
 };
 inline fn binaryOp(
     self: *Self,
@@ -136,14 +146,18 @@ inline fn binaryOp(
     }
     const b = self.pop().number;
     switch (op) {
-        .add      => {
-            // Use valueKind here to make sure it works
-            const a = self.pop().number;
-            self.push(valueKind(a + b));
-        },
+        .add      => self.peek(0).*.number += b,
         .subtract => self.peek(0).*.number -= b,
         .multiply => self.peek(0).*.number *= b,
         .divide   => self.peek(0).*.number /= b,
+        .greater => {
+            const a = self.pop().number;
+            self.push(valueKind(a > b));
+        },
+        .less => {
+            const a = self.pop().number;
+            self.push(valueKind(a < b));
+        },
     }
 }
 

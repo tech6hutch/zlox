@@ -30,6 +30,10 @@ pub const Value = union(ValueKind) {
     pub fn is_number(self: Value) bool {
         return self == Value.number;
     }
+
+    pub fn kind(self: Value) ValueKind {
+        return @as(ValueKind, self);
+    }
 };
 
 pub const Array = std.ArrayList(Value);
@@ -40,4 +44,13 @@ pub fn print(value: Value) void {
         .nil => std.debug.print("nil", .{}),
         .number => |n| std.debug.print("{d}", .{n}),
     }
+}
+
+pub fn equal(a: Value, b: Value) bool {
+    if (a.kind() != b.kind()) return false;
+    return switch (a) {
+        .bool => a.bool == b.bool,
+        .nil => true,
+        .number => a.number == b.number,
+    };
 }

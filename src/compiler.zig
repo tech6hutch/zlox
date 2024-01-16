@@ -128,6 +128,10 @@ fn emitBytes(byte1: Op, byte2: u8) void {
     emitOp(byte1);
     emitByte(byte2);
 }
+fn emitOps(byte1: Op, byte2: Op) void {
+    emitOp(byte1);
+    emitOp(byte2);
+}
 
 fn emitReturn() void {
     emitOp(.@"return");
@@ -164,10 +168,16 @@ fn binary() void {
     const rule = getRule(operatorKind);
     parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
     switch (operatorKind) {
-        .plus =>  emitByte(Op.add.int()),
-        .minus => emitByte(Op.subtract.int()),
-        .star =>  emitByte(Op.multiply.int()),
-        .slash => emitByte(Op.divide.int()),
+        .bang_equal =>    emitOps(.equal, .not),
+        .equal_equal =>   emitOp(.equal),
+        .greater =>       emitOp(.greater),
+        .greater_equal => emitOps(.less, .not),
+        .less =>          emitOp(.less),
+        .less_equal =>    emitOps(.greater, .not),
+        .plus =>  emitOp(.add),
+        .minus => emitOp(.subtract),
+        .star =>  emitOp(.multiply),
+        .slash => emitOp(.divide),
         else => unreachable
     }
 }
@@ -224,13 +234,13 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.slash,         ParseRule.init(null,     binary, .factor));
     arr.set(.star,          ParseRule.init(null,     binary, .factor));
     arr.set(.bang,          ParseRule.init(unary,    null,   .none));
-    arr.set(.bang_equal,    ParseRule.init(null,     null,   .none));
+    arr.set(.bang_equal,    ParseRule.init(null,     binary, .equality));
     arr.set(.equal,         ParseRule.init(null,     null,   .none));
-    arr.set(.equal_equal,   ParseRule.init(null,     null,   .none));
-    arr.set(.greater,       ParseRule.init(null,     null,   .none));
-    arr.set(.greater_equal, ParseRule.init(null,     null,   .none));
-    arr.set(.less,          ParseRule.init(null,     null,   .none));
-    arr.set(.less_equal,    ParseRule.init(null,     null,   .none));
+    arr.set(.equal_equal,   ParseRule.init(null,     binary, .equality));
+    arr.set(.greater,       ParseRule.init(null,     binary, .comparison));
+    arr.set(.greater_equal, ParseRule.init(null,     binary, .comparison));
+    arr.set(.less,          ParseRule.init(null,     binary, .comparison));
+    arr.set(.less_equal,    ParseRule.init(null,     binary, .comparison));
     arr.set(.identifier,    ParseRule.init(null,     null,   .none));
     arr.set(.string,        ParseRule.init(null,     null,   .none));
     arr.set(.number,        ParseRule.init(number,   null,   .none));
