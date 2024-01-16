@@ -27,11 +27,20 @@ pub fn init(self: *Self, allocator: Allocator) void {
     self.resetStack();
 	self.allocator = allocator;
 }
+pub fn deinit(self: *Self) void {
+    _ = self;
+}
 fn resetStack(self: *Self) void {
     self.stack_top = self.stack[0..];
 }
-pub fn deinit(self: *Self) void {
-    _ = self;
+fn runtimeError(self: *Self, comptime format: []const u8, args: anytype) void {
+    var stderr = std.io.getStdErr().writer();
+    stderr.print(format, args) catch {};
+    stderr.writeByte('\n') catch {};
+    const instruction = self.codeIndex() - 1;
+    const line = self.chunk.?.getLine(instruction);
+    stderr.print("[line {d}] in script\n", .{line}) catch {};
+    self.resetStack();
 }
 
 pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
@@ -63,9 +72,7 @@ fn run(self: *Self) InterpretError!void {
                 std.debug.print(" ]", .{});
             }
             std.debug.print("\n", .{});
-            _ = dbg.disassembleInstruction(
-                self.chunk.?,
-                @intFromPtr(self.ip.?) - @intFromPtr(self.chunk.?.code.items.ptr));
+            _ = dbg.disassembleInstruction(self.chunk.?, self.codeIndex());
         }
 
         const instruction = self.readByte();
@@ -74,11 +81,19 @@ fn run(self: *Self) InterpretError!void {
                 const constant: Value = self.readConst();
                 self.push(constant);
             },
-            Op.add.int() => self.binaryOp(.add),
-            Op.subtract.int() => self.binaryOp(.subtract),
-            Op.multiply.int() => self.binaryOp(.multiply),
-            Op.divide.int() => self.binaryOp(.divide),
-            Op.negate.int() => self.peek().* *= -1,
+            Op.add.int() =>      try self.binaryOp(f64, Value.numberVal, .add),
+            Op.subtract.int() => try self.binaryOp(f64, Value.numberVal, .subtract),
+            Op.multiply.int() => try self.binaryOp(f64, Value.numberVal, .multiply),
+            Op.divide.int() =>   try self.binaryOp(f64, Value.numberVal, .divide),
+            Op.negate.int() => {
+                switch (self.peek(0).*) {
+                    .number => |*n| n.* *= -1,
+                    else => {
+                        self.runtimeError("Operand must be a number.", .{});
+                        return InterpretError.RuntimeError;
+                    }
+                }
+            },
             Op.@"return".int() => {
                 printValue(self.pop());
                 std.debug.print("\n", .{});
@@ -104,13 +119,27 @@ const BinaryOp = enum {
     multiply,
     divide,
 };
-inline fn binaryOp(self: *Self, comptime op: BinaryOp) void {
-    const b = self.pop();
+inline fn binaryOp(
+    self: *Self,
+    comptime T: type,
+    valueKind: *const fn(T) Value,
+    comptime op: BinaryOp,
+) InterpretError!void
+{
+    if (!self.peek(0).is_number() or !self.peek(1).is_number()) {
+        self.runtimeError("Operands must be numbers.", .{});
+        return InterpretError.RuntimeError;
+    }
+    const b = self.pop().number;
     switch (op) {
-        .add      => self.peek().* += b,
-        .subtract => self.peek().* -= b,
-        .multiply => self.peek().* *= b,
-        .divide   => self.peek().* /= b,
+        .add      => {
+            // Use valueKind here to make sure it works
+            const a = self.pop().number;
+            self.push(valueKind(a + b));
+        },
+        .subtract => self.peek(0).*.number -= b,
+        .multiply => self.peek(0).*.number *= b,
+        .divide   => self.peek(0).*.number /= b,
     }
 }
 
@@ -122,8 +151,13 @@ fn pop(self: *Self) Value {
     self.stack_top.? -= 1;
     return self.stack_top.?[0];
 }
-inline fn peek(self: *Self) *Value {
-    return &(self.stack_top.? - 1)[0];
+inline fn peek(self: *Self, distance: isize) *Value {
+    // Zig doesn't allow negative indices. Sad.
+    return &(self.stack_top.? - 1 - distance)[0];
+}
+
+fn codeIndex(self: *Self) usize {
+    return @intFromPtr(self.ip.?) - @intFromPtr(self.chunk.?.code.items.ptr);
 }
 
 pub const InterpretError = error{ CompileError, RuntimeError };

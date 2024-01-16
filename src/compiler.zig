@@ -183,7 +183,7 @@ fn number() void {
 	const value = std.fmt.parseFloat(f64, parser.previous.lexeme)
 		// The scanner should return a proper number.
 		catch unreachable;
-	emitConstant(value);
+	emitConstant(.{ .number = value });
 }
 
 fn unary() void {
