@@ -3,9 +3,11 @@ const common = @import("./common.zig");
 const values = @import("./values.zig");
 const Value = values.Value;
 const loxmem = @import("./memory.zig");
+const Vm = @import("./Vm.zig");
 
 pub const Obj = struct {
     kind: ObjKind,
+    next: ?*Obj,
     pub inline fn downcast(self: *Obj, comptime T: type) *T {
         return @fieldParentPtr(T, "obj", self);
     }
@@ -62,5 +64,7 @@ fn allocateObj(comptime T: type, objKind: ObjKind) *T {
 fn _allocateObject(comptime T: type, objKind: ObjKind) *Obj {
     var object: *Obj = upcast(T, loxmem.create(T));
     object.kind = objKind;
+    object.next = Vm.vm.objs;
+    Vm.vm.objs = object;
     return object;
 }

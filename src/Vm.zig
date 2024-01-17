@@ -12,26 +12,27 @@ const valuesEqual = values.equal;
 const compiler = @import("./compiler.zig");
 const loxmem = @import("./memory.zig");
 const objects = @import("./objects.zig");
+const Obj = objects.Obj;
 
 const STACK_MAX: usize = 256;
 
 const Self = @This();
+pub var vm: Self = undefined;
 
 chunk: ?*Chunk,
 ip: ?[*]u8,
 stack: [STACK_MAX]Value,
 stack_top: ?[*]Value,
-allocator: Allocator,
+objs: ?*Obj = null,
 
-pub fn init(self: *Self, allocator: Allocator) void {
+pub fn init(self: *Self) void {
     self.chunk = null;
     self.ip = null;
     self.stack_top = null;
     self.resetStack();
-    self.allocator = allocator;
 }
 pub fn deinit(self: *Self) void {
-    _ = self;
+    loxmem.freeObjects(self);
 }
 fn resetStack(self: *Self) void {
     self.stack_top = self.stack[0..];
@@ -47,7 +48,7 @@ fn runtimeError(self: *Self, comptime format: []const u8, args: anytype) void {
 }
 
 pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
-    var chunk = Chunk.init(self.allocator);
+    var chunk = Chunk.init(loxmem.allocator);
 
     if (!compiler.compile(source, &chunk)) {
         chunk.deinit();

@@ -1,19 +1,47 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Vm = @import("./Vm.zig");
+const objects = @import("./objects.zig");
+const Obj = objects.Obj;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-pub const allocator = gpa.allocator();
+const inner_allocator = gpa.allocator();
+
+pub const allocator: Allocator = .{
+    .ptr = &gpa,
+    .vtable = &.{
+        .alloc = _alloc,
+        .resize = _resize,
+        .free = _free,
+    }
+};
+
+fn _alloc(ctx: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+    return inner_allocator.vtable.alloc(ctx, len, ptr_align, ret_addr);
+}
+fn _resize(ctx: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
+    return inner_allocator.vtable.resize(ctx, buf, buf_align, new_len, ret_addr);
+}
+fn _free(ctx: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
+    return inner_allocator.vtable.free(ctx, buf, buf_align, ret_addr);
+}
 
 pub fn allocate(comptime T: type, count: usize) []T {
     return allocator.alloc(T, count) catch |e| switch (e) {
         error.OutOfMemory => std.os.exit(1)
     };
 }
+pub fn freeArray(ptr: anytype) void {
+    allocator.free(ptr);
+}
 
 pub fn create(comptime T: type) *T {
     return allocator.create(T) catch |e| switch (e) {
         error.OutOfMemory => std.os.exit(1)
     };
+}
+pub fn destroy(ptr: anytype) void {
+    allocator.destroy(ptr);
 }
 
 // pub const WrappedAllocator = struct {
@@ -74,4 +102,23 @@ pub fn create(comptime T: type) *T {
 pub fn null_terminate(slice: []u8) [:0]u8 {
     slice[slice.len-1] = 0;
     return slice[0..slice.len-1:0];
+}
+
+pub fn freeObjects(vm: *Vm) void {
+    var object = vm.objs;
+    while (object) |o| {
+        const next = o.next;
+        freeObject(o);
+        object = next;
+    }
+}
+
+pub fn freeObject(object: *Obj) void {
+    switch (object.kind) {
+        .string => {
+            const string = object.downcast(objects.ObjString);
+            freeArray(string.chars);
+            destroy(string);
+        },
+    }
 }

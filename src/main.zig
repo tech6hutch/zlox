@@ -2,16 +2,20 @@ const std = @import("std");
 const Chunk = @import("./Chunk.zig");
 const Op = Chunk.OpCode;
 const Vm = @import("./Vm.zig");
-const allocator = @import("./memory.zig").allocator;
+const loxmem = @import("./memory.zig");
 
 const MAX_FILE_SIZE = 1_000_000;
+
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const main_allocator = gpa.allocator();
 
 var vm: Vm = undefined;
 
 pub fn main() !void {
-    vm.init(allocator);
+    Vm.vm.init();
+    vm = Vm.vm;
 
-    const args = try std.process.argsAlloc(allocator);
+    const args = try std.process.argsAlloc(main_allocator);
     switch (args.len) {
         1 => try repl(),
         2 => try runFile(args[1]),
@@ -54,7 +58,7 @@ fn repl() !void {
 
 fn runFile(path: []const u8) !void {
     const source = try readFile(path);
-    defer allocator.free(source);
+    defer main_allocator.free(source);
     vm.interpret(source) catch |e| switch (e) {
         error.CompileError => std.process.exit(65),
         error.RuntimeError => std.process.exit(70),
@@ -69,7 +73,7 @@ fn readFile(path: []const u8) ![:0]u8 {
     defer file.close();
 
     const contents: [:0]u8 = file.readToEndAllocOptions(
-        allocator,
+        main_allocator,
         MAX_FILE_SIZE,
         null,
         @alignOf(u8),
