@@ -2,11 +2,9 @@ const std = @import("std");
 const Chunk = @import("./Chunk.zig");
 const Op = Chunk.OpCode;
 const Vm = @import("./Vm.zig");
+const allocator = @import("./memory.zig").allocator;
 
 const MAX_FILE_SIZE = 1_000_000;
-
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-const allocator = gpa.allocator();
 
 var vm: Vm = undefined;
 

@@ -1,15 +1,21 @@
 const std = @import("std");
+const objects = @import("./objects.zig");
+const Obj = objects.Obj;
+const ObjKind = objects.ObjKind;
+const printObject = objects.printObject;
 
 const ValueKind = enum {
     bool,
     nil,
     number,
+    obj,
 };
 
 pub const Value = union(ValueKind) {
     bool: bool,
     nil: f64,
     number: f64,
+    obj: *Obj,
 
     pub fn boolVal(value: bool) Value {
         return .{ .bool = value };
@@ -20,19 +26,41 @@ pub const Value = union(ValueKind) {
     pub fn numberVal(value: f64) Value {
         return .{ .number = value };
     }
+    pub fn objVal(comptime T: type, object: *T) Value {
+        return .{ .obj = objects.upcast(T, object) };
+    }
 
-    pub fn is_bool(self: Value) bool {
+    pub inline fn isBool(self: Value) bool {
         return self == Value.bool;
     }
-    pub fn is_nil(self: Value) bool {
+    pub inline fn isNil(self: Value) bool {
         return self == Value.nil;
     }
-    pub fn is_number(self: Value) bool {
+    pub inline fn isNumber(self: Value) bool {
         return self == Value.number;
     }
+    pub inline fn isObj(self: Value) bool {
+        return self == Value.obj;
+    }
+    pub inline fn isString(self: Value) bool {
+        return self.isObjKind(.string);
+    }
+    pub inline fn isObjKind(self: Value, obj_kind: ObjKind) bool {
+        return self.isObj() and self.objKind() == obj_kind;
+    }
 
-    pub fn kind(self: Value) ValueKind {
+    pub inline fn asString(self: Value) *objects.ObjString {
+        return self.obj.downcast(objects.ObjString);
+    }
+    pub inline fn asZigString(self: Value) [:0]const u8 {
+        return self.asString().chars;
+    }
+
+    pub inline fn kind(self: Value) ValueKind {
         return @as(ValueKind, self);
+    }
+    pub inline fn objKind(self: Value) ObjKind {
+        return self.obj.kind;
     }
 };
 
@@ -43,6 +71,7 @@ pub fn print(value: Value) void {
         .bool => |b| std.debug.print("{s}", .{if (b) "true" else "false"}),
         .nil => std.debug.print("nil", .{}),
         .number => |n| std.debug.print("{d}", .{n}),
+        .obj => printObject(value),
     }
 }
 
@@ -52,5 +81,11 @@ pub fn equal(a: Value, b: Value) bool {
         .bool => a.bool == b.bool,
         .nil => true,
         .number => a.number == b.number,
+        .obj => {
+            const a_string = a.asString();
+            const b_string = b.asString();
+            return a_string.len() == b_string.len() and
+                std.mem.eql(u8, a_string.chars, b_string.chars);
+        }
     };
 }

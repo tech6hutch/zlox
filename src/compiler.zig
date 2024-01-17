@@ -9,6 +9,8 @@ const values = @import("./values.zig");
 const Value = values.Value;
 const common = @import("./common.zig");
 const dbg = @import("./debug.zig");
+const objects = @import("./objects.zig");
+const copyString = objects.copyString;
 
 var scanner: Scanner = undefined;
 
@@ -207,6 +209,10 @@ fn number() void {
     emitConstant(.{ .number = value });
 }
 
+fn string() void {
+    emitConstant(Value.objVal(objects.ObjString, copyString(parser.previous.lexeme[1..parser.previous.lexeme.len-1])));
+}
+
 fn unary() void {
     const operatorKind = parser.previous.kind;
     // Compile the operand.
@@ -242,7 +248,7 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.less,          ParseRule.init(null,     binary, .comparison));
     arr.set(.less_equal,    ParseRule.init(null,     binary, .comparison));
     arr.set(.identifier,    ParseRule.init(null,     null,   .none));
-    arr.set(.string,        ParseRule.init(null,     null,   .none));
+    arr.set(.string,        ParseRule.init(string,   null,   .none));
     arr.set(.number,        ParseRule.init(number,   null,   .none));
     arr.set(.@"and",        ParseRule.init(null,     null,   .none));
     arr.set(.class,         ParseRule.init(null,     null,   .none));

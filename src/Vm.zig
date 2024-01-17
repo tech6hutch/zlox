@@ -10,6 +10,8 @@ const Value = values.Value;
 const printValue = values.print;
 const valuesEqual = values.equal;
 const compiler = @import("./compiler.zig");
+const loxmem = @import("./memory.zig");
+const objects = @import("./objects.zig");
 
 const STACK_MAX: usize = 256;
 
@@ -92,7 +94,17 @@ fn run(self: *Self) InterpretError!void {
             },
             Op.greater.int() =>  try self.binaryOp(bool, Value.boolVal, .greater),
             Op.less.int() =>     try self.binaryOp(bool, Value.boolVal, .less),
-            Op.add.int() =>      try self.binaryOp(f64, Value.numberVal, .add),
+            Op.add.int() => {
+                if (self.peek(0).isString() and self.peek(1).isString()) {
+                    self.concatenate();
+                } else if (self.peek(0).isNumber() and self.peek(1).isNumber()) {
+                    const b = self.pop().number;
+                    self.peek(0).*.number += b;
+                } else {
+                    self.runtimeError("Operands must be two numbers or two strings.", .{});
+                    return InterpretError.RuntimeError;
+                }
+            },
             Op.subtract.int() => try self.binaryOp(f64, Value.numberVal, .subtract),
             Op.multiply.int() => try self.binaryOp(f64, Value.numberVal, .multiply),
             Op.divide.int() =>   try self.binaryOp(f64, Value.numberVal, .divide),
@@ -140,7 +152,7 @@ inline fn binaryOp(
     comptime op: BinaryOp,
 ) InterpretError!void
 {
-    if (!self.peek(0).is_number() or !self.peek(1).is_number()) {
+    if (!self.peek(0).isNumber() or !self.peek(1).isNumber()) {
         self.runtimeError("Operands must be numbers.", .{});
         return InterpretError.RuntimeError;
     }
@@ -174,7 +186,20 @@ inline fn peek(self: *Self, distance: isize) *Value {
     return &(self.stack_top.? - 1 - distance)[0];
 }
 fn isFalsey(value: Value) bool {
-    return value.is_nil() or (value.is_bool() and !value.bool);
+    return value.isNil() or (value.isBool() and !value.bool);
+}
+fn concatenate(self: *Self) void {
+    const b = self.pop().asString();
+    const a = self.pop().asString();
+
+    const ab_len = a.len() + b.len();
+    // a + b + null
+    var chars = loxmem.allocate(u8, ab_len + 1);
+    @memcpy(chars[0..a.len()], a.chars);
+    @memcpy(chars[a.len()..ab_len], b.chars);
+
+    const result = objects.takeString(loxmem.null_terminate(chars));
+    self.push(Value.objVal(objects.ObjString, result));
 }
 
 fn codeIndex(self: *Self) usize {
