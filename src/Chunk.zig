@@ -128,6 +128,10 @@ pub const OpCode = enum(u8) {
     nil,
     true,
     false,
+    pop,
+    get_global,
+    define_global,
+    set_global,
     equal,
     greater,
     less,
@@ -137,6 +141,7 @@ pub const OpCode = enum(u8) {
     divide,
     not,
     negate,
+    print,
     @"return",
     pub fn int(comptime self: OpCode) u8 {
         return @intFromEnum(self);

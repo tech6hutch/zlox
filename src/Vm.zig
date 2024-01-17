@@ -24,14 +24,17 @@ chunk: ?*Chunk          = null,
 ip: ?[*]u8              = null,
 stack: [STACK_MAX]Value,
 stack_top: ?[*]Value    = null,
+globals: Table,
 strings: Table,
 objs: ?*Obj             = null,
 
 pub fn init(self: *Self) void {
     self.resetStack();
+    self.globals = Table.init();
     self.strings = Table.init();
 }
 pub fn deinit(self: *Self) void {
+    self.globals.deinit();
     self.strings.deinit();
     loxmem.freeObjects(self);
 }
@@ -89,6 +92,29 @@ fn run(self: *Self) InterpretError!void {
             Op.nil.int() => self.push(Value.nilVal()),
             Op.true.int() => self.push(Value.boolVal(true)),
             Op.false.int() => self.push(Value.boolVal(false)),
+            Op.pop.int() => _ = self.pop(),
+            Op.get_global.int() => {
+                const name = self.readString();
+                var value: Value = undefined;
+                if (!self.globals.get(name, &value)) {
+                    self.runtimeError("Undefined variable '{s}'.", .{name.chars});
+                    return InterpretError.RuntimeError;
+                }
+                self.push(value);
+            },
+            Op.define_global.int() => {
+                const name = self.readString();
+                _ = self.globals.set(name, self.peek(0).*);
+                _ = self.pop();
+            },
+            Op.set_global.int() => {
+                const name = self.readString();
+                if (self.globals.set(name, self.peek(0).*)) {
+                    _ = self.globals.delete(name);
+                    self.runtimeError("Undefined variable '{s}'.", .{name.chars});
+                    return InterpretError.RuntimeError;
+                }
+            },
             Op.equal.int() => {
                 const b = self.pop();
                 const a = self.pop();
@@ -120,9 +146,12 @@ fn run(self: *Self) InterpretError!void {
                     }
                 }
             },
-            Op.@"return".int() => {
+            Op.print.int() => {
                 printValue(self.pop());
                 std.debug.print("\n", .{});
+            },
+            Op.@"return".int() => {
+                // Exit interpreter.
                 return;
             },
             else => {
@@ -138,6 +167,9 @@ inline fn readByte(self: *Self) u8 {
 }
 inline fn readConst(self: *Self) Value {
     return self.chunk.?.constIdx(self.readByte());
+}
+inline fn readString(self: *Self) *objects.ObjString {
+    return self.readConst().asString();
 }
 const BinaryOp = enum {
     add,

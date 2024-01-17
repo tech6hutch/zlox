@@ -32,7 +32,7 @@ pub fn deinit(self: *Table) void {
 pub fn get(self: *Table, key: *ObjString, value: *Value) bool {
     if (self.count == 0) return false;
 
-    const entry: *Entry = findEntry(self.entries, key);
+    const entry: *Entry = findEntry(self.entries.?, key);
     if (entry.key == null) return false;
 
     value.* = entry.value;
@@ -57,7 +57,7 @@ pub fn delete(self: *Table, key: *ObjString) bool {
     if (self.count == 0) return false;
 
     // Find the entry.
-    const entry: *Entry = findEntry(self.entries, key);
+    const entry: *Entry = findEntry(self.entries.?, key);
     if (entry.key == null) return false;
 
     // Place a tombstone in the entry.

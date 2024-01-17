@@ -33,6 +33,10 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .nil => simpleInstruction("OP_NIL", offset),
         .true => simpleInstruction("OP_TRUE", offset),
         .false => simpleInstruction("OP_FALSE", offset),
+        .pop => simpleInstruction("OP_POP", offset),
+        .get_global => constantInstruction("OP_GET_GLOBAL", chunk, offset),
+        .define_global => constantInstruction("OP_DEFINE_GLOBAL", chunk, offset),
+        .set_global => constantInstruction("OP_SET_GLOBAL", chunk, offset),
         .equal => simpleInstruction("OP_EQUAL", offset),
         .greater => simpleInstruction("OP_GREATER", offset),
         .less => simpleInstruction("OP_LESS", offset),
@@ -42,6 +46,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .divide => simpleInstruction("OP_DIVIDE", offset),
         .not => simpleInstruction("OP_NOT", offset),
         .negate => simpleInstruction("OP_NEGATE", offset),
+        .print => simpleInstruction("OP_PRINT", offset),
         .@"return" => simpleInstruction("OP_RETURN", offset),
     };
 }

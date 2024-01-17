@@ -22,8 +22,11 @@ pub fn compile(source: [*:0]const u8, chunk: *Chunk) bool {
     parser.panic_mode = false;
 
     advance();
-    expression();
-    consume(.eof, "Expect end of expression.");
+
+    while (!match(.eof)) {
+        declaration();
+    }
+
     endCompiler();
     return !parser.had_error;
 }
@@ -46,10 +49,14 @@ const Precedence = enum {
     factor,      // * /
     unary,       // ! -
     call,        // . ()
-    primary
+    primary,
+
+    fn lessEqual(self: Precedence, other: Precedence) bool {
+        return @intFromEnum(self) <= @intFromEnum(other);
+    }
 };
 
-const ParseFn = *const fn() void;
+const ParseFn = *const fn(can_assign: bool) void;
 
 const ParseRule = struct {
     prefix: ?ParseFn,
@@ -115,6 +122,16 @@ fn consume(kind: TokenKind, message: []const u8) void {
     errorAtCurrent(message);
 }
 
+fn check(kind: TokenKind) bool {
+    return parser.current.kind == kind;
+}
+
+fn match(kind: TokenKind) bool {
+    if (!check(kind)) return false;
+    advance();
+    return true;
+}
+
 fn emitByte(byte: u8) void {
     currentChunk().writeByte(byte, parser.previous.line) catch |e| {
         switch (e) {
@@ -165,7 +182,7 @@ fn endCompiler() void {
     }
 }
 
-fn binary() void {
+fn binary(_: bool) void {
     const operatorKind = parser.previous.kind;
     const rule = getRule(operatorKind);
     parsePrecedence(@enumFromInt(@intFromEnum(rule.precedence) + 1));
@@ -184,7 +201,7 @@ fn binary() void {
     }
 }
 
-fn literal() void {
+fn literal(_: bool) void {
     switch (parser.previous.kind) {
         .false => emitOp(.false),
         .nil => emitOp(.nil),
@@ -193,7 +210,7 @@ fn literal() void {
     }
 }
 
-fn grouping() void {
+fn grouping(_: bool) void {
     expression();
     consume(.right_paren, "Expect ')' after expression.");
 }
@@ -202,18 +219,94 @@ fn expression() void {
     parsePrecedence(.assignment);
 }
 
-fn number() void {
+fn varDeclaration() void {
+    const global: u8 = parseVariable("Expect variable name.");
+
+    if (match(.equal)) {
+        expression();
+    } else {
+        emitOp(.nil);
+    }
+    consume(.semicolon, "Expect ';' after variable declaration.");
+
+    defineVariable(global);
+}
+
+fn expressionStatement() void {
+    expression();
+    consume(.semicolon, "Expect ';' after expression.");
+    emitOp(.pop);
+}
+
+fn printStatement() void {
+    expression();
+    consume(.semicolon, "Expect ';' after value.");
+    emitOp(.print);
+}
+
+fn synchronize() void {
+    parser.panic_mode = false;
+
+    while (parser.current.kind != .eof) {
+        if (parser.previous.kind == .semicolon) return;
+        switch (parser.current.kind) {
+            .class, .fun, .@"var",
+            .@"for", .@"if", .@"while",
+            .print, .@"return" => return,
+
+            // Do nothing.
+            else => {}
+        }
+
+        advance();
+    }
+}
+
+fn declaration() void {
+    if (match(.@"var")) {
+        varDeclaration();
+    } else {
+        statement();
+    }
+
+    if (parser.panic_mode) synchronize();
+}
+
+fn statement() void {
+    if (match(.print)) {
+        printStatement();
+    } else {
+        expressionStatement();
+    }
+}
+
+fn number(_: bool) void {
     const value = std.fmt.parseFloat(f64, parser.previous.lexeme)
         // The scanner should return a proper number.
         catch unreachable;
     emitConstant(.{ .number = value });
 }
 
-fn string() void {
+fn string(_: bool) void {
     emitConstant(Value.objVal(objects.ObjString, copyString(parser.previous.lexeme[1..parser.previous.lexeme.len-1])));
 }
 
-fn unary() void {
+fn namedVariable(name: Token, can_assign: bool) void {
+    const arg: u8 = identifierConstant(&name);
+
+    if (can_assign and match(.equal)) {
+        expression();
+        emitBytes(.set_global, arg);
+    } else {
+        emitBytes(.get_global, arg);
+    }
+}
+
+fn variable(can_assign: bool) void {
+    namedVariable(parser.previous, can_assign);
+}
+
+fn unary(_: bool) void {
     const operatorKind = parser.previous.kind;
     // Compile the operand.
     parsePrecedence(.unary);
@@ -247,7 +340,7 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.greater_equal, ParseRule.init(null,     binary, .comparison));
     arr.set(.less,          ParseRule.init(null,     binary, .comparison));
     arr.set(.less_equal,    ParseRule.init(null,     binary, .comparison));
-    arr.set(.identifier,    ParseRule.init(null,     null,   .none));
+    arr.set(.identifier,    ParseRule.init(variable, null,   .none));
     arr.set(.string,        ParseRule.init(string,   null,   .none));
     arr.set(.number,        ParseRule.init(number,   null,   .none));
     arr.set(.@"and",        ParseRule.init(null,     null,   .none));
@@ -278,12 +371,31 @@ fn parsePrecedence(precedence: Precedence) void {
         err("Expect expression.");
         return;
     }
-    prefixRule.?();
-    while (@intFromEnum(precedence) <= @intFromEnum(getRule(parser.current.kind).precedence)) {
+    const can_assign = precedence.lessEqual(.assignment);
+    prefixRule.?(can_assign);
+
+    while (precedence.lessEqual(getRule(parser.current.kind).precedence)) {
         advance();
         const infixRule = getRule(parser.previous.kind).infix;
-        infixRule.?();
+        infixRule.?(can_assign);
     }
+
+    if (can_assign and match(.equal)) {
+        err("Invalid assignment target.");
+    }
+}
+
+fn identifierConstant(name: *const Token) u8 {
+    return makeConstant(Value.objVal(objects.ObjString, copyString(name.lexeme)));
+}
+
+fn parseVariable(error_message: []const u8) u8 {
+    consume(.identifier, error_message);
+    return identifierConstant(&parser.previous);
+}
+
+fn defineVariable(global: u8) void {
+    emitBytes(.define_global, global);
 }
 
 fn getRule(kind: TokenKind) *const ParseRule {
