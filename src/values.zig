@@ -81,11 +81,6 @@ pub fn equal(a: Value, b: Value) bool {
         .bool => a.bool == b.bool,
         .nil => true,
         .number => a.number == b.number,
-        .obj => {
-            const a_string = a.asString();
-            const b_string = b.asString();
-            return a_string.len() == b_string.len() and
-                std.mem.eql(u8, a_string.chars, b_string.chars);
-        }
+        .obj => a.obj == b.obj,
     };
 }

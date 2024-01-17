@@ -13,25 +13,26 @@ const compiler = @import("./compiler.zig");
 const loxmem = @import("./memory.zig");
 const objects = @import("./objects.zig");
 const Obj = objects.Obj;
+const Table = @import("./Table.zig");
 
 const STACK_MAX: usize = 256;
 
 const Self = @This();
 pub var vm: Self = undefined;
 
-chunk: ?*Chunk,
-ip: ?[*]u8,
+chunk: ?*Chunk          = null,
+ip: ?[*]u8              = null,
 stack: [STACK_MAX]Value,
-stack_top: ?[*]Value,
-objs: ?*Obj = null,
+stack_top: ?[*]Value    = null,
+strings: Table,
+objs: ?*Obj             = null,
 
 pub fn init(self: *Self) void {
-    self.chunk = null;
-    self.ip = null;
-    self.stack_top = null;
     self.resetStack();
+    self.strings = Table.init();
 }
 pub fn deinit(self: *Self) void {
+    self.strings.deinit();
     loxmem.freeObjects(self);
 }
 fn resetStack(self: *Self) void {

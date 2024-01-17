@@ -39,10 +39,19 @@ pub const ObjString = struct {
 
 pub fn takeString(str: [:0]u8) *ObjString {
     const hash = hashString(str);
+    const maybe_interned: ?*ObjString = Vm.vm.strings.findString(str, hash);
+    if (maybe_interned) |interned| {
+        loxmem.freeArray(str);
+        return interned;
+    }
+
     return allocateString(str, hash);
 }
 pub fn copyString(str: []const u8) *ObjString {
     const hash = hashString(str);
+    const maybe_interned: ?*ObjString = Vm.vm.strings.findString(str, hash);
+    if (maybe_interned) |interned| return interned;
+
     const heapChars = loxmem.allocate(u8, str.len + 1);
     @memcpy(heapChars, str.ptr);
     return allocateString(loxmem.null_terminate(heapChars), hash);
@@ -58,6 +67,7 @@ fn allocateString(str: [:0]u8, hash: u32) *ObjString {
     var string: *ObjString = allocateObj(ObjString, .string);
     string.chars = str;
     string.hash = hash;
+    _ = Vm.vm.strings.set(string, Value.nilVal());
     return string;
 }
 

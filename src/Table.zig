@@ -40,7 +40,8 @@ pub fn get(self: *Table, key: *ObjString, value: *Value) bool {
 }
 
 pub fn set(self: *Table, key: *ObjString, value: Value) bool {
-    if (self.count + 1 > self.capacity() * TABLE_MAX_LOAD) {
+    const current_load = @as(f64, @floatFromInt(self.capacity())) * TABLE_MAX_LOAD;
+    if (@as(f64, @floatFromInt(self.count + 1)) > current_load) {
         self.adjustCapacity(loxmem.growCapacity(self.capacity()));
     }
     var entry: *Entry = findEntry(self.entries.?, key);
@@ -74,6 +75,28 @@ pub fn addAll(self: *Table, from: *Table) void {
     }
 }
 
+pub fn findString(self: *Table, str: []const u8, hash: u32) ?*ObjString {
+    if (self.count == 0) return null;
+
+    var index: usize = hash % self.capacity();
+    while (true) {
+        const entry: *Entry = &self.entries.?[index];
+        if (entry.key) |key| {
+            if (key.len() == str.len and
+                    key.hash == hash and
+                    std.mem.eql(u8, key.chars, str)) {
+                // We found it.
+                return entry.key;
+            }
+        } else if (entry.value.isNil()) {
+            // Stop if we find an empty non-tombstone entry.
+            return null;
+        }
+
+        index = (index + 1) % self.capacity();
+    }
+}
+
 fn adjustCapacity(self: *Table, new_capacity: usize) void {
     const new_entries: []Entry = loxmem.allocate(Entry, new_capacity);
     for (new_entries) |*entry| {
@@ -82,10 +105,10 @@ fn adjustCapacity(self: *Table, new_capacity: usize) void {
     }
 
     self.count = 0;
-    if (self.entries) |*old_entries| {
+    if (self.entries) |old_entries| {
         for (old_entries) |*old_entry| {
             if (old_entry.key == null) continue;
-            const new_entry = findEntry(new_entries, old_entry.key);
+            const new_entry = findEntry(new_entries, old_entry.key.?);
             new_entry.key = old_entry.key;
             new_entry.value = old_entry.value;
             self.count += 1;
@@ -105,7 +128,7 @@ pub const Entry = struct {
 };
 
 fn findEntry(entries: []Entry, key: *ObjString) *Entry {
-    var index: u32 = key.hash % entries.len;
+    var index: usize = key.hash % entries.len;
     var tombstone: ?*Entry = null;
     while (true) {
         const entry: *Entry = &entries[index];
