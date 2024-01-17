@@ -28,6 +28,7 @@ pub const ObjKind = enum {
 pub const ObjString = struct {
     obj: Obj,
     chars: [:0]u8,
+    hash: u32,
     pub inline fn len(self: *ObjString) usize {
         return self.chars.len;
     }
@@ -37,12 +38,14 @@ pub const ObjString = struct {
 };
 
 pub fn takeString(str: [:0]u8) *ObjString {
-    return allocateString(str);
+    const hash = hashString(str);
+    return allocateString(str, hash);
 }
 pub fn copyString(str: []const u8) *ObjString {
+    const hash = hashString(str);
     const heapChars = loxmem.allocate(u8, str.len + 1);
     @memcpy(heapChars, str.ptr);
-    return allocateString(loxmem.null_terminate(heapChars));
+    return allocateString(loxmem.null_terminate(heapChars), hash);
 }
 
 pub fn printObject(value: Value) void {
@@ -51,10 +54,21 @@ pub fn printObject(value: Value) void {
     }
 }
 
-fn allocateString(str: [:0]u8) *ObjString {
+fn allocateString(str: [:0]u8, hash: u32) *ObjString {
     var string: *ObjString = allocateObj(ObjString, .string);
     string.chars = str;
+    string.hash = hash;
     return string;
+}
+
+/// Uses FNV-1a
+fn hashString(key: []const u8) u32 {
+    var hash: u32 = 2166136261;
+    for (key) |char| {
+        hash ^= char;
+        hash *%= 16777619;
+    }
+    return hash;
 }
 
 fn allocateObj(comptime T: type, objKind: ObjKind) *T {

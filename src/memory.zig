@@ -98,6 +98,10 @@ pub fn destroy(ptr: anytype) void {
 //     }
 // };
 
+pub fn growCapacity(capacity: usize) usize {
+    return if (capacity < 8) 8 else capacity * 2;
+}
+
 /// Writes a null sentinel to a string and returns it with the proper type.
 pub fn null_terminate(slice: []u8) [:0]u8 {
     slice[slice.len-1] = 0;
