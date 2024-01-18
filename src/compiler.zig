@@ -12,6 +12,8 @@ const dbg = @import("./debug.zig");
 const objects = @import("./objects.zig");
 const copyString = objects.copyString;
 
+const MAX_SWITCH_CASES = 256;
+
 var scanner: Scanner = undefined;
 
 pub fn compile(source: [*:0]const u8, chunk: *Chunk) bool {
@@ -187,6 +189,8 @@ fn emitLoop(loop_start: usize) void {
     emitByte(offset_bytes[1]);
 }
 
+/// Emits a jump instruction where we are now. Make sure to patch it later with
+/// the right offset (at the returned location in the chunk).
 fn emitJump(instruction: Op) usize {
     emitOp(instruction);
     emitByte(0xff);
@@ -217,6 +221,7 @@ fn emitConstant(value: Value) void {
     emitBytes(Op.constant, makeConstant(value));
 }
 
+/// Change the jump operand at `offset` to point just past where we are now.
 fn patchJump(offset: usize) void {
     // -2 to adjust for the bytecode for the jump offset itself.
     const jump: usize = currentChunk().count() - offset - 2;
@@ -226,6 +231,15 @@ fn patchJump(offset: usize) void {
             err("Too much code to jump over.");
             break :blk 0;
         };
+
+    if (std.debug.runtime_safety and (
+        currentChunk().code.items[offset] != 0xff or
+        currentChunk().code.items[offset + 1] != 0xff
+    )) {
+        std.debug.panic(
+            "You may be trying to patch a jump you already patched. Ignore if you're compiling a block that's exactly {d} bytes of instructions, I guess.",
+            .{std.math.maxInt(u16)});
+    }
 
     const jump_bytes: [2]u8 = @bitCast(jump16);
     currentChunk().code.items[offset] = jump_bytes[0];
@@ -406,6 +420,54 @@ fn printStatement() void {
     emitOp(.print);
 }
 
+fn switchStatement() void {
+    consume(.left_paren, "Expect '(' after 'switch'.");
+    expression();
+    consume(.right_paren, "Expect ')' after switch value.");
+    consume(.left_brace, "Expect '{' after parenthesized switch value.");
+
+    // Each are relative to the start of the switch, to save space since we
+    // allocate statically like this.
+    var switch_jumps: [MAX_SWITCH_CASES]u16 = undefined;
+    var switch_jump_count: u16 = 0;
+
+    const switch_offset: usize = currentChunk().count();
+
+    var case_jump: usize = std.math.maxInt(usize);
+    while (match(.case)) {
+        if (case_jump != std.math.maxInt(usize)) {
+            patchJump(case_jump);
+        }
+
+        consume(.left_paren, "Expect '(' after 'case'.");
+        expression();
+        consume(.right_paren, "Expect ')' after case value.");
+        case_jump = emitJump(.case);
+
+        statement();
+
+        switch_jumps[switch_jump_count] = std.math.cast(u16, emitJump(.jump) - switch_offset)
+            orelse {
+                err("Switch is too big.");
+                return;
+            };
+        switch_jump_count += 1;
+    }
+    if (case_jump != std.math.maxInt(usize)) {
+        patchJump(case_jump);
+    }
+
+    // Default case.
+    emitOp(.pop); // if we're here, none of the cases popped the switch value
+    if (match(.@"else")) statement();
+
+    for (switch_jumps[0..switch_jump_count]) |switch_jump| {
+        patchJump(switch_jump + switch_offset);
+    }
+
+    consume(.right_brace, "Expect '}' after switch cases.");
+}
+
 fn whileStatement() void {
     const loop_start = currentChunk().count();
     consume(.left_paren, "Expect '(' after 'while'.");
@@ -454,6 +516,8 @@ fn statement() void {
         forStatement();
     } else if (match(.@"if")) {
         ifStatement();
+    } else if (match(.@"switch")) {
+        switchStatement();
     } else if (match(.@"while")) {
         whileStatement();
     } else if (match(.left_brace)) {

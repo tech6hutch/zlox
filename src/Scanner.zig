@@ -136,7 +136,14 @@ fn checkKeyword(self: *Self, comptime start: usize, comptime length: usize,
 fn identifierKind(self: *Self) TokenKind {
     return switch (self.start[0]) {
         'a' => self.checkKeyword(1, 2, "nd", .@"and"),
-        'c' => self.checkKeyword(1, 4, "lass", .class),
+        'c' =>
+            if (self.currentSlice().len > 1)
+                switch (self.start[1]) {
+                    'a' => self.checkKeyword(2, 2, "se", .case),
+                    'l' => self.checkKeyword(2, 3, "ass", .class),
+                    else => .identifier
+                }
+            else .identifier,
         'e' => self.checkKeyword(1, 3, "lse", .@"else"),
         'f' =>
             if (self.currentSlice().len > 1)
@@ -152,7 +159,14 @@ fn identifierKind(self: *Self) TokenKind {
         'o' => self.checkKeyword(1, 1, "r", .@"or"),
         'p' => self.checkKeyword(1, 4, "rint", .print),
         'r' => self.checkKeyword(1, 5, "eturn", .@"return"),
-        's' => self.checkKeyword(1, 4, "uper", .super),
+        's' =>
+            if (self.currentSlice().len > 1)
+                switch (self.start[1]) {
+                    'u' => self.checkKeyword(2, 3, "per", .super),
+                    'w' => self.checkKeyword(2, 4, "itch", .@"switch"),
+                    else => .identifier
+                }
+            else .identifier,
         't' =>
             if (self.currentSlice().len > 1)
                 switch (self.start[1]) {
@@ -221,6 +235,8 @@ pub const TokenKind = enum {
     @"for", fun, @"if", nil, @"or",
     print, @"return", super, this,
     true, @"var", @"while",
+    // Extensions to Lox.
+    @"switch", case,
 
     err, eof
 };

@@ -182,6 +182,15 @@ fn run(self: *Self) InterpretError!void {
                 const offset: u16 = self.readTwoBytes();
                 self.ip.? -= offset;
             },
+            Op.case.int() => {
+                const offset: u16 = self.readTwoBytes();
+                const b = self.pop();
+                if (valuesEqual(self.peek(0).*, b)) {
+                    _ = self.pop(); // ^^^^^^^ pop this (the switch value)
+                } else {
+                    self.ip.? += offset; // jump over the case body
+                }
+            },
             Op.@"return".int() => {
                 // Exit interpreter.
                 return;
