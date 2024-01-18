@@ -87,10 +87,6 @@ const Compiler = struct {
     local_count: u9,
     // 256 is also a fine limit on nested scopes, IMHO.
     scope_depth: u8,
-
-    fn usedLocals(self: *Compiler) []Local {
-        return self.locals[0..self.local_count];
-    }
 };
 
 var parser = Parser{
