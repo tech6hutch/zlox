@@ -50,20 +50,25 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .not => simpleInstruction("OP_NOT", offset),
         .negate => simpleInstruction("OP_NEGATE", offset),
         .print => simpleInstruction("OP_PRINT", offset),
+        .jump => jumpInstruction("OP_JUMP", 1, chunk, offset),
+        .jump_if_false => jumpInstruction("OP_JUMP_IF_FALSE", 1, chunk, offset),
+        .jump_if_false_pop => jumpInstruction("OP_JUMP_IF_FALSE_POP", 1, chunk, offset),
         .@"return" => simpleInstruction("OP_RETURN", offset),
     };
 }
 
+const NAME_PADDING = "20";
+
 fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const constant = chunk.idx(offset + 1);
-    std.debug.print("{s:<16} {d:>4} '", .{name, constant});
+    std.debug.print("{s:<"++NAME_PADDING++"} {d:>4} '", .{name, constant});
     printValue(chunk.constIdx(constant));
     std.debug.print("'\n", .{});
     return offset + 2;
 }
 fn constantInstructionLong(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const constant: u24 = @bitCast([3]u8{chunk.idx(offset+1), chunk.idx(offset+2), chunk.idx(offset+3)});
-    std.debug.print("{s:<16} {d:>4} '", .{name, constant});
+    std.debug.print("{s:<"++NAME_PADDING++"} {d:>4} '", .{name, constant});
     printValue(chunk.constIdx(constant));
     std.debug.print("'\n", .{});
     return offset + 4;
@@ -76,6 +81,14 @@ fn simpleInstruction(name: []const u8, offset: usize) usize {
 
 fn byteInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const slot: u8 = chunk.idx(offset + 1);
-    std.debug.print("{s:<16} {d:>4}\n", .{name, slot});
+    std.debug.print("{s:<"++NAME_PADDING++"} {d:>4}\n", .{name, slot});
     return offset + 2;
+}
+
+fn jumpInstruction(name: []const u8, sign: i2, chunk: *Chunk, offset: usize) usize {
+    const jump: u16 = @bitCast([2]u8{chunk.idx(offset+1), chunk.idx(offset+2)});
+    const jumpAddr: isize = @as(isize, @intCast(offset)) + 3 + @as(isize, sign) * @as(isize, jump);
+    std.debug.print("{s:<"++NAME_PADDING++"} {d:>4} -> {d}\n",
+        .{name, offset, jumpAddr});
+    return offset + 3;
 }

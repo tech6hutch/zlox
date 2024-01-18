@@ -166,6 +166,18 @@ fn run(self: *Self) InterpretError!void {
                 printValue(self.pop());
                 std.debug.print("\n", .{});
             },
+            Op.jump.int() => {
+                const offset: u16 = self.readTwoBytes();
+                self.ip.? += offset;
+            },
+            Op.jump_if_false.int() => {
+                const offset: u16 = self.readTwoBytes();
+                if (isFalsey(self.peek(0).*)) self.ip.? += offset;
+            },
+            Op.jump_if_false_pop.int() => {
+                const offset: u16 = self.readTwoBytes();
+                if (isFalsey(self.pop())) self.ip.? += offset;
+            },
             Op.@"return".int() => {
                 // Exit interpreter.
                 return;
@@ -183,6 +195,11 @@ inline fn readByte(self: *Self) u8 {
 }
 inline fn readConst(self: *Self) Value {
     return self.chunk.?.constIdx(self.readByte());
+}
+inline fn readTwoBytes(self: *Self) u16 {
+    const bytes = [2]u8{ self.ip.?[0], self.ip.?[1] };
+    self.ip.? += 2;
+    return @bitCast(bytes);
 }
 inline fn readString(self: *Self) *objects.ObjString {
     return self.readConst().asString();

@@ -145,6 +145,9 @@ pub const OpCode = enum(u8) {
     not,
     negate,
     print,
+    jump,
+    jump_if_false,
+    jump_if_false_pop,
     @"return",
     pub fn int(comptime self: OpCode) u8 {
         return @intFromEnum(self);

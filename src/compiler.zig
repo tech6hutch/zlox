@@ -171,6 +171,13 @@ fn emitOps(byte1: Op, byte2: Op) void {
     emitOp(byte2);
 }
 
+fn emitJump(instruction: Op) usize {
+    emitOp(instruction);
+    emitByte(0xff);
+    emitByte(0xff);
+    return currentChunk().count() - 2;
+}
+
 fn emitReturn() void {
     emitOp(.@"return");
 }
@@ -192,6 +199,21 @@ fn makeConstant(value: Value) u8 {
 
 fn emitConstant(value: Value) void {
     emitBytes(Op.constant, makeConstant(value));
+}
+
+fn patchJump(offset: usize) void {
+    // -2 to adjust for the bytecode for the jump offset itself.
+    const jump: usize = currentChunk().count() - offset - 2;
+
+    const jump16: u16 = std.math.cast(u16, jump)
+        orelse blk: {
+            err("Too much code to jump over.");
+            break :blk 0;
+        };
+
+    const jump_bytes: [2]u8 = @bitCast(jump16);
+    currentChunk().code.items[offset] = jump_bytes[0];
+    currentChunk().code.items[offset + 1] = jump_bytes[1];
 }
 
 fn initCompiler(compiler: *Compiler) void {
@@ -302,6 +324,22 @@ fn expressionStatement() void {
     emitOp(.pop);
 }
 
+fn ifStatement() void {
+    consume(.left_paren, "Expect '(' after 'if'.");
+    expression();
+    consume(.right_paren, "Expect ')' after condition.");
+
+    const then_jump = emitJump(.jump_if_false_pop);
+    statement();
+
+    const else_jump = emitJump(.jump);
+
+    patchJump(then_jump);
+
+    if (match(.@"else")) statement();
+    patchJump(else_jump);
+}
+
 fn printStatement() void {
     expression();
     consume(.semicolon, "Expect ';' after value.");
@@ -339,6 +377,8 @@ fn declaration() void {
 fn statement() void {
     if (match(.print)) {
         printStatement();
+    } else if (match(.@"if")) {
+        ifStatement();
     } else if (match(.left_brace)) {
         beginScope();
         block();
@@ -353,6 +393,17 @@ fn number(_: bool) void {
         // The scanner should return a proper number.
         catch unreachable;
     emitConstant(.{ .number = value });
+}
+
+fn or_(_: bool) void {
+    const else_jump = emitJump(.jump_if_false);
+    const end_jump = emitJump(.jump);
+
+    patchJump(else_jump);
+    emitOp(.pop);
+
+    parsePrecedence(.@"or");
+    patchJump(end_jump);
 }
 
 fn string(_: bool) void {
@@ -418,7 +469,7 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.identifier,    ParseRule.init(variable, null,   .none));
     arr.set(.string,        ParseRule.init(string,   null,   .none));
     arr.set(.number,        ParseRule.init(number,   null,   .none));
-    arr.set(.@"and",        ParseRule.init(null,     null,   .none));
+    arr.set(.@"and",        ParseRule.init(null,     and_,   .@"and"));
     arr.set(.class,         ParseRule.init(null,     null,   .none));
     arr.set(.@"else",       ParseRule.init(null,     null,   .none));
     arr.set(.false,         ParseRule.init(literal,  null,   .none));
@@ -426,7 +477,7 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.fun,           ParseRule.init(null,     null,   .none));
     arr.set(.@"if",         ParseRule.init(null,     null,   .none));
     arr.set(.nil,           ParseRule.init(literal,  null,   .none));
-    arr.set(.@"or",         ParseRule.init(null,     null,   .none));
+    arr.set(.@"or",         ParseRule.init(null,     or_,    .@"or"));
     arr.set(.print,         ParseRule.init(null,     null,   .none));
     arr.set(.@"return",     ParseRule.init(null,     null,   .none));
     arr.set(.super,         ParseRule.init(null,     null,   .none));
@@ -539,6 +590,15 @@ fn defineVariable(global: u8) void {
     }
 
     emitBytes(.define_global, global);
+}
+
+fn and_(_: bool) void {
+    const end_jump = emitJump(.jump_if_false);
+
+    emitOp(.pop);
+    parsePrecedence(.@"and");
+
+    patchJump(end_jump);
 }
 
 fn getRule(kind: TokenKind) *const ParseRule {
