@@ -171,6 +171,22 @@ fn emitOps(byte1: Op, byte2: Op) void {
     emitOp(byte2);
 }
 
+fn emitLoop(loop_start: usize) void {
+    emitOp(.loop);
+
+    // +2 for the loop instruction's own operands, which we write below.
+    const offset: usize = currentChunk().count() - loop_start + 2;
+    const offset16 = std.math.cast(u16, offset)
+        orelse blk: {
+            err("Loop body too large.");
+            break :blk 0;
+        };
+
+    const offset_bytes: [2]u8 = @bitCast(offset16);
+    emitByte(offset_bytes[0]);
+    emitByte(offset_bytes[1]);
+}
+
 fn emitJump(instruction: Op) usize {
     emitOp(instruction);
     emitByte(0xff);
@@ -346,6 +362,19 @@ fn printStatement() void {
     emitOp(.print);
 }
 
+fn whileStatement() void {
+    const loop_start = currentChunk().count();
+    consume(.left_paren, "Expect '(' after 'while'.");
+    expression();
+    consume(.right_paren, "Expect ')' after condition.");
+
+    const exit_jump = emitJump(.jump_if_false_pop);
+    statement();
+    emitLoop(loop_start);
+
+    patchJump(exit_jump);
+}
+
 fn synchronize() void {
     parser.panic_mode = false;
 
@@ -379,6 +408,8 @@ fn statement() void {
         printStatement();
     } else if (match(.@"if")) {
         ifStatement();
+    } else if (match(.@"while")) {
+        whileStatement();
     } else if (match(.left_brace)) {
         beginScope();
         block();

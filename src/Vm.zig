@@ -178,6 +178,10 @@ fn run(self: *Self) InterpretError!void {
                 const offset: u16 = self.readTwoBytes();
                 if (isFalsey(self.pop())) self.ip.? += offset;
             },
+            Op.loop.int() => {
+                const offset: u16 = self.readTwoBytes();
+                self.ip.? -= offset;
+            },
             Op.@"return".int() => {
                 // Exit interpreter.
                 return;
