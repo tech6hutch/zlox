@@ -20,18 +20,22 @@ const STACK_MAX: usize = 256;
 const Self = @This();
 pub var vm: Self = undefined;
 
-chunk: ?*Chunk          = null,
-ip: ?[*]u8              = null,
+chunk: ?*Chunk,
+ip: ?[*]u8,
 stack: [STACK_MAX]Value,
-stack_top: ?[*]Value    = null,
+stack_top: ?[*]Value,
 globals: Table,
 strings: Table,
-objs: ?*Obj             = null,
+objs: ?*Obj,
 
 pub fn init(self: *Self) void {
+    self.chunk = null;
+    self.ip = null;
+    self.stack_top = null;
     self.resetStack();
     self.globals = Table.init();
     self.strings = Table.init();
+    self.objs = null;
 }
 pub fn deinit(self: *Self) void {
     self.globals.deinit();
@@ -93,6 +97,14 @@ fn run(self: *Self) InterpretError!void {
             Op.true.int() => self.push(Value.boolVal(true)),
             Op.false.int() => self.push(Value.boolVal(false)),
             Op.pop.int() => _ = self.pop(),
+            Op.get_local.int() => {
+                const slot: u8 = self.readByte();
+                self.push(self.stack[slot]);
+            },
+            Op.set_local.int() => {
+                const slot: u8 = self.readByte();
+                self.stack[slot] = self.peek(0).*;
+            },
             Op.get_global.int() => {
                 const name = self.readString();
                 var value: Value = undefined;

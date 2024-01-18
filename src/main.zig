@@ -9,11 +9,11 @@ const MAX_FILE_SIZE = 1_000_000;
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const main_allocator = gpa.allocator();
 
-var vm: Vm = undefined;
+var vm: *Vm = undefined;
 
 pub fn main() !void {
     Vm.vm.init();
-    vm = Vm.vm;
+    vm = &Vm.vm;
 
     const args = try std.process.argsAlloc(main_allocator);
     switch (args.len) {

@@ -16,6 +16,8 @@ var scanner: Scanner = undefined;
 
 pub fn compile(source: [*:0]const u8, chunk: *Chunk) bool {
     scanner = Scanner.init(source);
+    var compiler: Compiler = undefined;
+    initCompiler(&compiler);
     compiling_chunk = chunk;
 
     parser.had_error = false;
@@ -71,10 +73,31 @@ const ParseRule = struct {
     }
 };
 
+const Local = struct {
+    name: Token,
+    // Needs to hold up to 256 and down to -1.
+    depth: i16,
+};
+
+const Compiler = struct {
+    // Exactly 256 because the instruction operand used to encode a local
+    // is a single byte.
+    locals: [256]Local,
+    // Indicating we have the max 256 locals won't fit in a u8 lol.
+    local_count: u9,
+    // 256 is also a fine limit on nested scopes, IMHO.
+    scope_depth: u8,
+
+    fn usedLocals(self: *Compiler) []Local {
+        return self.locals[0..self.local_count];
+    }
+};
+
 var parser = Parser{
     .previous = undefined,
     .current = undefined,
 };
+var current: *Compiler = undefined;
 var compiling_chunk: ?*Chunk = null;
 fn currentChunk() *Chunk {
     return compiling_chunk.?;
@@ -175,10 +198,31 @@ fn emitConstant(value: Value) void {
     emitBytes(Op.constant, makeConstant(value));
 }
 
+fn initCompiler(compiler: *Compiler) void {
+    compiler.local_count = 0;
+    compiler.scope_depth = 0;
+    current = compiler;
+}
+
 fn endCompiler() void {
     emitReturn();
     if (common.DEBUG_PRINT_CODE and !parser.had_error) {
         dbg.disassembleChunk(currentChunk(), "code");
+    }
+}
+
+fn beginScope() void {
+    current.scope_depth += 1;
+}
+
+fn endScope() void {
+    current.scope_depth -= 1;
+
+    // TODO: specialized OP_POPN instruction
+    while (current.local_count > 0 and
+            current.locals[current.local_count - 1].depth > current.scope_depth) {
+        emitOp(.pop);
+        current.local_count -= 1;
     }
 }
 
@@ -217,6 +261,14 @@ fn grouping(_: bool) void {
 
 fn expression() void {
     parsePrecedence(.assignment);
+}
+
+fn block() void {
+    while (!check(.right_brace) and !check(.eof)) {
+        declaration();
+    }
+
+    consume(.right_brace, "Expect '}' after block.");
 }
 
 fn varDeclaration() void {
@@ -275,6 +327,10 @@ fn declaration() void {
 fn statement() void {
     if (match(.print)) {
         printStatement();
+    } else if (match(.left_brace)) {
+        beginScope();
+        block();
+        endScope();
     } else {
         expressionStatement();
     }
@@ -292,13 +348,20 @@ fn string(_: bool) void {
 }
 
 fn namedVariable(name: Token, can_assign: bool) void {
-    const arg: u8 = identifierConstant(&name);
+    var get_op: Op = .get_local;
+    var set_op: Op = .set_local;
+    var arg = resolveLocal(current, &name);
+    if (arg == -1) {
+        arg = identifierConstant(&name);
+        get_op = .get_global;
+        set_op = .set_global;
+    }
 
     if (can_assign and match(.equal)) {
         expression();
-        emitBytes(.set_global, arg);
+        emitBytes(set_op, @intCast(arg));
     } else {
-        emitBytes(.get_global, arg);
+        emitBytes(get_op, @intCast(arg));
     }
 }
 
@@ -389,12 +452,80 @@ fn identifierConstant(name: *const Token) u8 {
     return makeConstant(Value.objVal(objects.ObjString, copyString(name.lexeme)));
 }
 
+fn identifiersEqual(a: *const Token, b: *const Token) bool {
+    if (a.lexeme.len != b.lexeme.len) return false;
+    return std.mem.eql(u8, a.lexeme, b.lexeme);
+}
+
+fn resolveLocal(compiler: *Compiler, name: *const Token) i16 {
+    var i = compiler.local_count;
+    while (i > 0) {
+        i -= 1;
+        const local: *Local = &compiler.locals[i];
+        if (identifiersEqual(name, &local.name)) {
+            if (local.depth == -1) {
+                err("Can't read local variable in its own initializer.");
+            }
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+fn addLocal(name: Token) void {
+    if (current.local_count == current.locals.len) {
+        err("Too many local variables in function.");
+        return;
+    }
+
+    var local: *Local = &current.locals[current.local_count];
+    current.local_count += 1;
+    local.name = name;
+    local.depth = -1;
+}
+
+fn declareVariable() void {
+    if (current.scope_depth == 0) return;
+
+    const name: *Token = &parser.previous;
+    var i = current.local_count;
+    while (i > 0) {
+        i += 1;
+        const local: *Local = &current.locals[i];
+        if (local.depth != -1 and local.depth < current.scope_depth) {
+            break;
+        }
+
+        if (identifiersEqual(name, &local.name)) {
+            err("Already a variable with this name in this scope.");
+        }
+    }
+
+    addLocal(name.*);
+}
+
+/// Return value is the index of the identifier's name if it's global, otherwise
+/// a dummy value of 0 if it's local.
 fn parseVariable(error_message: []const u8) u8 {
     consume(.identifier, error_message);
+
+    declareVariable();
+    if (current.scope_depth > 0) return 0;
+
     return identifierConstant(&parser.previous);
 }
 
+fn markInitialized() void {
+    current.locals[current.local_count - 1].depth = current.scope_depth;
+}
+
 fn defineVariable(global: u8) void {
+    if (current.scope_depth > 0) {
+        markInitialized();
+        return;
+    }
+
     emitBytes(.define_global, global);
 }
 
