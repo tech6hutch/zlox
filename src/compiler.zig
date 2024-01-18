@@ -340,6 +340,50 @@ fn expressionStatement() void {
     emitOp(.pop);
 }
 
+fn forStatement() void {
+    beginScope();
+    consume(.left_paren, "Expect '(' after 'for'.");
+    if (match(.semicolon)) {
+        // No initializer.
+    } else if (match(.@"var")) {
+        varDeclaration();
+    } else {
+        expressionStatement();
+    }
+
+    var loop_start = currentChunk().count();
+    var exit_jump: usize = std.math.maxInt(usize);
+    if (!match(.semicolon)) {
+        expression();
+        consume(.semicolon, "Expect ';' after loop condition.");
+
+        // Jump out of the loop if the condition is false.
+        exit_jump = emitJump(.jump_if_false_pop);
+    }
+
+    if (!match(.right_paren)) {
+        // Jump over the increment since it should run _after_ the body.
+        const body_jump = emitJump(.jump);
+        const increment_start = currentChunk().count();
+        expression();
+        emitOp(.pop);
+        consume(.right_paren, "Expect ')' after for clauses.");
+
+        emitLoop(loop_start); // jump up to the condition
+        loop_start = increment_start;
+        patchJump(body_jump);
+    }
+
+    statement();
+    emitLoop(loop_start); // jump up to the condition (or the increment if there is one)
+
+    if (exit_jump != std.math.maxInt(usize)) {
+        patchJump(exit_jump);
+    }
+
+    endScope();
+}
+
 fn ifStatement() void {
     consume(.left_paren, "Expect '(' after 'if'.");
     expression();
@@ -406,6 +450,8 @@ fn declaration() void {
 fn statement() void {
     if (match(.print)) {
         printStatement();
+    } else if (match(.@"for")) {
+        forStatement();
     } else if (match(.@"if")) {
         ifStatement();
     } else if (match(.@"while")) {
