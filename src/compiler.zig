@@ -214,12 +214,28 @@ fn beginScope() void {
 fn endScope() void {
     current.scope_depth -= 1;
 
-    // TODO: specialized OP_POPN instruction
+    const prev_local_count = current.local_count;
     while (current.local_count > 0 and
             current.locals[current.local_count - 1].depth > current.scope_depth) {
-        emitOp(.pop);
         current.local_count -= 1;
     }
+
+    var n = prev_local_count - current.local_count;
+    if (n <= 1) {
+        if (n == 1) emitOp(.pop);
+        return;
+    }
+
+    var n_u8: u8 = @truncate(n);
+    if (n_u8 != n) {
+        emitOp(.pop);
+        n -= 1;
+        n_u8 = @truncate(n);
+        if (n_u8 != n) {
+            @panic("This shouldn't happen, there were more local vars than 256?");
+        }
+    }
+    emitBytes(.popn, n_u8);
 }
 
 fn binary(_: bool) void {

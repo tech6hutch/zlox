@@ -97,6 +97,10 @@ fn run(self: *Self) InterpretError!void {
             Op.true.int() => self.push(Value.boolVal(true)),
             Op.false.int() => self.push(Value.boolVal(false)),
             Op.pop.int() => _ = self.pop(),
+            Op.popn.int() => {
+                const n = self.readByte();
+                self.stack_top.? -= n;
+            },
             Op.get_local.int() => {
                 const slot: u8 = self.readByte();
                 self.push(self.stack[slot]);
