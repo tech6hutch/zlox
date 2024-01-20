@@ -24,7 +24,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
 
     const instruction_byte: u8 = chunk.idx(offset);
     const instruction: OpCode = std.meta.intToEnum(OpCode, instruction_byte) catch {
-        std.debug.print("Unknown opcode {d}\n", .{offset});
+        std.debug.print("Unknown opcode {d}\n", .{instruction_byte});
         return offset + 1;
     };
     return switch (instruction) {
@@ -54,7 +54,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         .jump_if_false => jumpInstruction("OP_JUMP_IF_FALSE", 1, chunk, offset),
         .jump_if_false_pop => jumpInstruction("OP_JUMP_IF_FALSE_POP", 1, chunk, offset),
         .loop => jumpInstruction("OP_LOOP", -1, chunk, offset),
+        .case => jumpInstruction("OP_CASE", 1, chunk, offset),
         .@"return" => simpleInstruction("OP_RETURN", offset),
+        .debug => debugInstruction("OP_DEBUG", chunk, offset),
     };
 }
 
@@ -92,4 +94,11 @@ fn jumpInstruction(name: []const u8, sign: i2, chunk: *Chunk, offset: usize) usi
     std.debug.print("{s:<"++NAME_PADDING++"} {d:>4} -> {d}\n",
         .{name, offset, jumpAddr});
     return offset + 3;
+}
+
+fn debugInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
+    const len = chunk.idx(offset + 1);
+    const str = chunk.code.items[offset+2..offset+2+len];
+    std.debug.print("{s:<"++NAME_PADDING++"} // {s}\n", .{name, str});
+    return offset + 2 + len;
 }

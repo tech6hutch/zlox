@@ -13,6 +13,7 @@ const objects = @import("./objects.zig");
 const copyString = objects.copyString;
 
 const MAX_SWITCH_CASES = 256;
+const MAX_LOOP_BREAKS = 256;
 
 var scanner: Scanner = undefined;
 
@@ -81,6 +82,16 @@ const Local = struct {
     depth: i16,
 };
 
+const LoopInfo = struct {
+    scope_depth: u8,
+    /// Offset of the start of the loop.
+    continue_offset: usize,
+    /// Jumps (from break statements) to patch. Relative to start of loop
+    /// (`continue_offset`) to save space.
+    break_offsets: [MAX_LOOP_BREAKS]u16,
+    break_offset_count: std.math.IntFittingRange(0, MAX_LOOP_BREAKS),
+};
+
 const Compiler = struct {
     // Exactly 256 because the instruction operand used to encode a local
     // is a single byte.
@@ -89,6 +100,7 @@ const Compiler = struct {
     local_count: u9,
     // 256 is also a fine limit on nested scopes, IMHO.
     scope_depth: u8,
+    innermost_loop: ?*LoopInfo,
 };
 
 var parser = Parser{
@@ -173,6 +185,20 @@ fn emitOps(byte1: Op, byte2: Op) void {
     emitOp(byte2);
 }
 
+fn emitPops(starting_count: usize) void {
+    var count = starting_count;
+    while (count > 1) {
+        emitOp(.popn);
+        const diff: usize = @min(count, std.math.maxInt(u8));
+        emitByte(@intCast(diff));
+        count -= diff;
+    }
+    if (count == 1) {
+        emitOp(.pop);
+    }
+}
+
+/// Emits an instruction to (unconditionally) jump _up_ to `loop_start`.
 fn emitLoop(loop_start: usize) void {
     emitOp(.loop);
 
@@ -200,6 +226,15 @@ fn emitJump(instruction: Op) usize {
 
 fn emitReturn() void {
     emitOp(.@"return");
+}
+
+fn emitDebug(str: []const u8) void {
+    emitOp(.debug);
+    const len: u8 = std.math.cast(u8, str.len) orelse {
+        @panic("str must be under 256 chars");
+    };
+    emitByte(len);
+    for (str) |char| emitByte(char);
 }
 
 fn makeConstant(value: Value) u8 {
@@ -236,8 +271,10 @@ fn patchJump(offset: usize) void {
         currentChunk().code.items[offset] != 0xff or
         currentChunk().code.items[offset + 1] != 0xff
     )) {
+        dbg.disassembleChunk(currentChunk(), "code before panic");
         std.debug.panic(
-            "You may be trying to patch a jump you already patched. Ignore if you're compiling a block that's exactly {d} bytes of instructions, I guess.",
+            "You may be trying to patch a jump you already patched. See code above. " ++
+            "Ignore if you're compiling a block that's exactly {d} bytes of instructions, I guess.",
             .{std.math.maxInt(u16)});
     }
 
@@ -245,10 +282,16 @@ fn patchJump(offset: usize) void {
     currentChunk().code.items[offset] = jump_bytes[0];
     currentChunk().code.items[offset + 1] = jump_bytes[1];
 }
+fn patchBreaks(loop_info: LoopInfo) void {
+    for (loop_info.break_offsets[0..loop_info.break_offset_count]) |break_offset| {
+        patchJump(break_offset + loop_info.continue_offset);
+    }
+}
 
 fn initCompiler(compiler: *Compiler) void {
     compiler.local_count = 0;
     compiler.scope_depth = 0;
+    compiler.innermost_loop = null;
     current = compiler;
 }
 
@@ -264,30 +307,32 @@ fn beginScope() void {
 }
 
 fn endScope() void {
-    current.scope_depth -= 1;
+    current.local_count -= popScopesDownTo(current.scope_depth);
 
-    const prev_local_count = current.local_count;
-    while (current.local_count > 0 and
-            current.locals[current.local_count - 1].depth > current.scope_depth) {
-        current.local_count -= 1;
+    current.scope_depth = std.math.sub(u8, current.scope_depth, 1)
+        catch {
+            dbg.disassembleChunk(currentChunk(), "code before panic");
+            @panic("Tried to end the top-most scope (i.e., an overflow occured in 'current.scope_depth -= 1;').");
+        };
+}
+
+/// Pops all locals at `scope_depth` and deeper. Returns the number of locals popped.
+fn popScopesDownTo(scope_depth: u8) u9 {
+    if (std.debug.runtime_safety and current.scope_depth < scope_depth) {
+        std.debug.panic(
+            "Tried to pop scopes until depth {d}, but we're already back up to depth {d}",
+            .{scope_depth, current.scope_depth});
     }
 
-    var n = prev_local_count - current.local_count;
-    if (n <= 1) {
-        if (n == 1) emitOp(.pop);
-        return;
+    var count: u9 = 0;
+    var index: u9 = current.local_count;
+    while (index > 0) {
+        index -= 1;
+        if (current.locals[index].depth < scope_depth) break;
+        count += 1;
     }
-
-    var n_u8: u8 = @truncate(n);
-    if (n_u8 != n) {
-        emitOp(.pop);
-        n -= 1;
-        n_u8 = @truncate(n);
-        if (n_u8 != n) {
-            @panic("This shouldn't happen, there were more local vars than 256?");
-        }
-    }
-    emitBytes(.popn, n_u8);
+    emitPops(count);
+    return count;
 }
 
 fn binary(_: bool) void {
@@ -348,6 +393,33 @@ fn varDeclaration() void {
     defineVariable(global);
 }
 
+fn breakStatement() void {
+    if (current.innermost_loop) |loop_info| {
+        _ = popScopesDownTo(loop_info.scope_depth + 1);
+        const break_offset = emitJump(.jump) - loop_info.continue_offset;
+        loop_info.break_offsets[loop_info.break_offset_count] =
+            std.math.cast(u16, break_offset)
+            orelse blk: {
+                err("Loop body too large.");
+                break :blk 0;
+            };
+        loop_info.break_offset_count += 1;
+    } else {
+        err("Can't use 'break' outside of a loop.");
+    }
+    consume(.semicolon, "Expect ';' after 'break'.");
+}
+
+fn continueStatement() void {
+    if (current.innermost_loop) |loop_info| {
+        _ = popScopesDownTo(loop_info.scope_depth + 1);
+        emitLoop(loop_info.continue_offset);
+    } else {
+        err("Can't use 'continue' outside of a loop.");
+    }
+    consume(.semicolon, "Expect ';' after 'continue'.");
+}
+
 fn expressionStatement() void {
     expression();
     consume(.semicolon, "Expect ';' after expression.");
@@ -365,7 +437,15 @@ fn forStatement() void {
         expressionStatement();
     }
 
-    var loop_start = currentChunk().count();
+    var loop_info: LoopInfo = .{
+        .scope_depth = current.scope_depth,
+        .continue_offset = currentChunk().count(),
+        .break_offsets = undefined,
+        .break_offset_count = 0,
+    };
+    const prev_loop_info = current.innermost_loop;
+    current.innermost_loop = &loop_info;
+
     var exit_jump: usize = std.math.maxInt(usize);
     if (!match(.semicolon)) {
         expression();
@@ -383,17 +463,20 @@ fn forStatement() void {
         emitOp(.pop);
         consume(.right_paren, "Expect ')' after for clauses.");
 
-        emitLoop(loop_start); // jump up to the condition
-        loop_start = increment_start;
+        emitLoop(loop_info.continue_offset); // jump up to the condition
+        loop_info.continue_offset = increment_start;
         patchJump(body_jump);
     }
 
     statement();
-    emitLoop(loop_start); // jump up to the condition (or the increment if there is one)
+    // Jump up to the condition (or the increment if there is one).
+    emitLoop(loop_info.continue_offset);
+    current.innermost_loop = prev_loop_info;
 
     if (exit_jump != std.math.maxInt(usize)) {
         patchJump(exit_jump);
     }
+    patchBreaks(loop_info);
 
     endScope();
 }
@@ -469,16 +552,30 @@ fn switchStatement() void {
 }
 
 fn whileStatement() void {
-    const loop_start = currentChunk().count();
+    beginScope(); // for consistency with for loops, even tho we don't declare anything
+
+    var loop_info: LoopInfo = .{
+        .scope_depth = current.scope_depth,
+        .continue_offset = currentChunk().count(),
+        .break_offsets = undefined,
+        .break_offset_count = 0,
+    };
+    const prev_loop_info = current.innermost_loop;
+    current.innermost_loop = &loop_info;
+
     consume(.left_paren, "Expect '(' after 'while'.");
     expression();
     consume(.right_paren, "Expect ')' after condition.");
 
     const exit_jump = emitJump(.jump_if_false_pop);
     statement();
-    emitLoop(loop_start);
+    emitLoop(loop_info.continue_offset);
+    current.innermost_loop = prev_loop_info;
 
     patchJump(exit_jump);
+    patchBreaks(loop_info);
+
+    endScope();
 }
 
 fn synchronize() void {
@@ -512,6 +609,10 @@ fn declaration() void {
 fn statement() void {
     if (match(.print)) {
         printStatement();
+    } else if (match(.@"break")) {
+        breakStatement();
+    } else if (match(.@"continue")) {
+        continueStatement();
     } else if (match(.@"for")) {
         forStatement();
     } else if (match(.@"if")) {

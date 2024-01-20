@@ -151,6 +151,7 @@ pub const OpCode = enum(u8) {
     loop,
     case,
     @"return",
+    debug,
     pub fn int(comptime self: OpCode) u8 {
         return @intFromEnum(self);
     }

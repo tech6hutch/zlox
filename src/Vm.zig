@@ -45,6 +45,10 @@ pub fn deinit(self: *Self) void {
 fn resetStack(self: *Self) void {
     self.stack_top = self.stack[0..];
 }
+/// If negative, something has gone very wrong.
+fn stackSlotsInUse(self: *Self) i64 {
+    return @intCast(@intFromPtr(self.stack_top) - @intFromPtr(&self.stack[0]));
+}
 fn runtimeError(self: *Self, comptime format: []const u8, args: anytype) void {
     var stderr = std.io.getStdErr().writer();
     stderr.print(format, args) catch {};
@@ -68,6 +72,17 @@ pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
 
     const result = self.run();
 
+    if (result) |_| {
+        if (self.stackSlotsInUse() > 0) {
+            self.runtimeError(
+                "Internal error: something went wrong, not all stack values were popped. Attempting to dump the stack below:",
+                .{});
+            self.dumpStack();
+        } else if (self.stackSlotsInUse() < 0) {
+            @panic("Popped too many stack values, somehow.");
+        }
+    } else |_| {}
+
     chunk.deinit();
     return result;
 }
@@ -76,14 +91,7 @@ fn run(self: *Self) InterpretError!void {
     const Op = Chunk.OpCode;
     while (true) {
         if (common.DEBUG_TRACE_EXECUTION) {
-            std.debug.print("          ", .{});
-            var slot: [*]Value = &self.stack;
-            while (@intFromPtr(slot) < @intFromPtr(self.stack_top)) : (slot += 1) {
-                std.debug.print("[ ", .{});
-                printValue(slot[0]);
-                std.debug.print(" ]", .{});
-            }
-            std.debug.print("\n", .{});
+            self.dumpStack();
             _ = dbg.disassembleInstruction(self.chunk.?, self.codeIndex());
         }
 
@@ -99,6 +107,11 @@ fn run(self: *Self) InterpretError!void {
             Op.pop.int() => _ = self.pop(),
             Op.popn.int() => {
                 const n = self.readByte();
+                if (std.debug.runtime_safety and
+                    @intFromPtr(self.stack_top) - n < @intFromPtr(&self.stack[0]))
+                {
+                    @panic("Tried to pop an empty stack.");
+                }
                 self.stack_top.? -= n;
             },
             Op.get_local.int() => {
@@ -195,6 +208,10 @@ fn run(self: *Self) InterpretError!void {
                 // Exit interpreter.
                 return;
             },
+            Op.debug.int() => {
+                const len = self.readByte();
+                self.ip.? += len;
+            },
             else => {
                 std.debug.panic("unknown opcode {d}", .{instruction});
             },
@@ -253,11 +270,27 @@ inline fn binaryOp(
     }
 }
 
+fn dumpStack(self: *Self) void {
+    std.debug.print("          ", .{});
+    var slot: [*]Value = &self.stack;
+    while (@intFromPtr(slot) < @intFromPtr(self.stack_top)) : (slot += 1) {
+        std.debug.print("[ ", .{});
+        printValue(slot[0]);
+        std.debug.print(" ]", .{});
+    }
+    std.debug.print("\n", .{});
+}
+
 fn push(self: *Self, value: Value) void {
     self.stack_top.?[0] = value;
     self.stack_top.? += 1;
 }
 fn pop(self: *Self) Value {
+    if (std.debug.runtime_safety and
+        @intFromPtr(self.stack_top) == @intFromPtr(&self.stack[0]))
+    {
+        @panic("Tried to pop an empty stack.");
+    }
     self.stack_top.? -= 1;
     return self.stack_top.?[0];
 }
