@@ -10,6 +10,8 @@ const Value = values.Value;
 const common = @import("./common.zig");
 const dbg = @import("./debug.zig");
 const objects = @import("./objects.zig");
+const ObjString = objects.ObjString;
+const ObjFunction = objects.ObjFunction;
 const copyString = objects.copyString;
 
 const MAX_SWITCH_CASES = 256;
@@ -17,11 +19,10 @@ const MAX_LOOP_BREAKS = 256;
 
 var scanner: Scanner = undefined;
 
-pub fn compile(source: [*:0]const u8, chunk: *Chunk) bool {
+pub fn compile(source: [*:0]const u8) ?*ObjFunction {
     scanner = Scanner.init(source);
     var compiler: Compiler = undefined;
-    initCompiler(&compiler);
-    compiling_chunk = chunk;
+    initCompiler(&compiler, .script);
 
     parser.had_error = false;
     parser.panic_mode = false;
@@ -32,8 +33,9 @@ pub fn compile(source: [*:0]const u8, chunk: *Chunk) bool {
         declaration();
     }
 
-    endCompiler();
-    return !parser.had_error;
+    // Don't use `current` anymore, it's undefined now.
+    const fun = endCompiler();
+    return if (parser.had_error) null else fun;
 }
 
 const Parser = struct {
@@ -92,7 +94,16 @@ const LoopInfo = struct {
     break_offset_count: std.math.IntFittingRange(0, MAX_LOOP_BREAKS),
 };
 
+const FunctionKind = enum {
+    function,
+    script,
+};
+
 const Compiler = struct {
+    enclosing: ?*Compiler,
+    function: ?*ObjFunction,
+    kind: FunctionKind,
+
     // Exactly 256 because the instruction operand used to encode a local
     // is a single byte.
     locals: [256]Local,
@@ -108,9 +119,9 @@ var parser = Parser{
     .current = undefined,
 };
 var current: *Compiler = undefined;
-var compiling_chunk: ?*Chunk = null;
+
 fn currentChunk() *Chunk {
-    return compiling_chunk.?;
+    return &current.function.?.chunk;
 }
 
 fn err(message: []const u8) void {
@@ -224,7 +235,9 @@ fn emitJump(instruction: Op) usize {
     return currentChunk().count() - 2;
 }
 
+/// Emits instructions that return nil.
 fn emitReturn() void {
+    emitOp(.nil);
     emitOp(.@"return");
 }
 
@@ -288,18 +301,38 @@ fn patchBreaks(loop_info: LoopInfo) void {
     }
 }
 
-fn initCompiler(compiler: *Compiler) void {
+fn initCompiler(compiler: *Compiler, kind: FunctionKind) void {
+    // TODO: isn't it going to be UB if we use `enclosing`? `current` starts out undefined.
+    compiler.enclosing = current;
+    compiler.function = null;
+    compiler.kind = kind;
     compiler.local_count = 0;
     compiler.scope_depth = 0;
+    compiler.function = objects.newFunction();
     compiler.innermost_loop = null;
     current = compiler;
+    if (kind != .script) {
+        current.function.?.name = copyString(parser.previous.lexeme);
+    }
+
+    var local: *Local = &current.locals[current.local_count];
+    current.local_count += 1;
+    local.depth = 0;
+    local.name.lexeme = "";
 }
 
-fn endCompiler() void {
+fn endCompiler() *ObjFunction {
     emitReturn();
+    const fun = current.function.?;
+
     if (common.DEBUG_PRINT_CODE and !parser.had_error) {
-        dbg.disassembleChunk(currentChunk(), "code");
+        dbg.disassembleChunk(currentChunk(),
+            if (fun.name) |name| name.chars else "<script>");
     }
+
+    // We never read from this again, it's okay.
+    current = current.enclosing orelse undefined;
+    return fun;
 }
 
 fn beginScope() void {
@@ -354,6 +387,11 @@ fn binary(_: bool) void {
     }
 }
 
+fn call(_: bool) void {
+    const arg_count = argumentList();
+    emitBytes(.call, arg_count);
+}
+
 fn literal(_: bool) void {
     switch (parser.previous.kind) {
         .false => emitOp(.false),
@@ -378,6 +416,41 @@ fn block() void {
     }
 
     consume(.right_brace, "Expect '}' after block.");
+}
+
+fn function(kind: FunctionKind) void {
+    var compiler: Compiler = undefined;
+    initCompiler(&compiler, kind);
+    beginScope(); // ends implicitly
+
+    consume(.left_paren, "Expect '(' after function name.");
+    if (!check(.right_paren)) {
+        const arity = &current.function.?.arity;
+        while (true) {
+            arity.* = std.math.add(u8, arity.*, 1) catch {
+                errorAtCurrent(std.fmt.comptimePrint(
+                    "Can't have more than 255 parameters.",
+                    .{}));
+                return;
+            };
+            const constant = parseVariable("Expect parameter name.");
+            defineVariable(constant);
+            if (!match(.comma)) break;
+        }
+    }
+    consume(.right_paren, "Expect ')' after parameters.");
+    consume(.left_brace, "Expect '{' before function body.");
+    block();
+
+    const fun = endCompiler();
+    emitBytes(.constant, makeConstant(Value.objVal(ObjFunction, fun)));
+}
+
+fn funDeclaration() void {
+    const global = parseVariable("Expect function name.");
+    markInitialized(); // allows functions to refer to themselves
+    function(.function);
+    defineVariable(global);
 }
 
 fn varDeclaration() void {
@@ -503,6 +576,20 @@ fn printStatement() void {
     emitOp(.print);
 }
 
+fn returnStatement() void {
+    if (current.kind == .script) {
+        err("Can't return from top-level code.");
+    }
+
+    if (match(.semicolon)) {
+        emitReturn();
+    } else {
+        expression();
+        consume(.semicolon, "Expect ';' after return value.");
+        emitOp(.@"return");
+    }
+}
+
 fn switchStatement() void {
     consume(.left_paren, "Expect '(' after 'switch'.");
     expression();
@@ -597,7 +684,9 @@ fn synchronize() void {
 }
 
 fn declaration() void {
-    if (match(.@"var")) {
+    if (match(.fun)) {
+        funDeclaration();
+    } else if (match(.@"var")) {
         varDeclaration();
     } else {
         statement();
@@ -617,6 +706,8 @@ fn statement() void {
         forStatement();
     } else if (match(.@"if")) {
         ifStatement();
+    } else if (match(.@"return")) {
+        returnStatement();
     } else if (match(.@"switch")) {
         switchStatement();
     } else if (match(.@"while")) {
@@ -649,7 +740,7 @@ fn or_(_: bool) void {
 }
 
 fn string(_: bool) void {
-    emitConstant(Value.objVal(objects.ObjString, copyString(parser.previous.lexeme[1..parser.previous.lexeme.len-1])));
+    emitConstant(Value.objVal(ObjString, copyString(parser.previous.lexeme[1..parser.previous.lexeme.len-1])));
 }
 
 fn namedVariable(name: Token, can_assign: bool) void {
@@ -689,7 +780,7 @@ fn unary(_: bool) void {
 const rules: EnumArray(TokenKind, ParseRule) = def: {
     var arr = EnumArray(TokenKind, ParseRule)
         .initFill(ParseRule.init(null, null, .none));
-    arr.set(.left_paren,    ParseRule.init(grouping, null,   .none));
+    arr.set(.left_paren,    ParseRule.init(grouping, call,   .call));
     arr.set(.right_paren,   ParseRule.init(null,     null,   .none));
     arr.set(.left_brace,    ParseRule.init(null,     null,   .none));
     arr.set(.right_brace,   ParseRule.init(null,     null,   .none));
@@ -754,7 +845,7 @@ fn parsePrecedence(precedence: Precedence) void {
 }
 
 fn identifierConstant(name: *const Token) u8 {
-    return makeConstant(Value.objVal(objects.ObjString, copyString(name.lexeme)));
+    return makeConstant(Value.objVal(ObjString, copyString(name.lexeme)));
 }
 
 fn identifiersEqual(a: *const Token, b: *const Token) bool {
@@ -822,6 +913,7 @@ fn parseVariable(error_message: []const u8) u8 {
 }
 
 fn markInitialized() void {
+    if (current.scope_depth == 0) return;
     current.locals[current.local_count - 1].depth = current.scope_depth;
 }
 
@@ -832,6 +924,22 @@ fn defineVariable(global: u8) void {
     }
 
     emitBytes(.define_global, global);
+}
+
+fn argumentList() u8 {
+    var arg_count: u8 = 0;
+    if (!check(.right_paren)) {
+        while (true) {
+            expression();
+            if (arg_count == 255) {
+                err("Can't have more than 255 arguments.");
+            }
+            arg_count += 1;
+            if (!match(.comma)) break;
+        }
+    }
+    consume(.right_paren, "Expect ')' after arguments.");
+    return arg_count;
 }
 
 fn and_(_: bool) void {

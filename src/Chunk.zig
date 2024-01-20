@@ -150,6 +150,7 @@ pub const OpCode = enum(u8) {
     jump_if_false_pop,
     loop,
     case,
+    call,
     @"return",
     debug,
     pub fn int(comptime self: OpCode) u8 {

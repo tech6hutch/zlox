@@ -42,6 +42,9 @@ pub const Value = union(ValueKind) {
     pub inline fn isObj(self: Value) bool {
         return self == Value.obj;
     }
+    pub inline fn isFunction(self: Value) bool {
+        return self.isObjKind(.function);
+    }
     pub inline fn isString(self: Value) bool {
         return self.isObjKind(.string);
     }
@@ -49,6 +52,9 @@ pub const Value = union(ValueKind) {
         return self.isObj() and self.objKind() == obj_kind;
     }
 
+    pub inline fn asFunction(self: Value) *objects.ObjFunction {
+        return self.obj.downcast(objects.ObjFunction);
+    }
     pub inline fn asString(self: Value) *objects.ObjString {
         return self.obj.downcast(objects.ObjString);
     }

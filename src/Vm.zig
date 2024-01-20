@@ -13,15 +13,48 @@ const compiler = @import("./compiler.zig");
 const loxmem = @import("./memory.zig");
 const objects = @import("./objects.zig");
 const Obj = objects.Obj;
+const ObjFunction = objects.ObjFunction;
+const ObjString = objects.ObjString;
 const Table = @import("./Table.zig");
 
-const STACK_MAX: usize = 256;
+const FRAMES_MAX: usize = 64;
+const STACK_MAX: usize = FRAMES_MAX * 256;
+
+const CallFrame = struct {
+    function: *ObjFunction,
+    ip: [*]u8,
+    slots: [*]Value,
+
+    // Pray to God and Andrew Kelley that `self` becomes `frame` when these get
+    // inlined in run() below and that `frame` is in a register 🙏
+    inline fn readByte(self: *CallFrame) u8 {
+        const byte = self.ip[0];
+        self.ip += 1;
+        return byte;
+    }
+    inline fn readConst(self: *CallFrame) Value {
+        return self.function.chunk.constIdx(self.readByte());
+    }
+    inline fn readTwoBytes(self: *CallFrame) u16 {
+        const bytes = [2]u8{ self.ip[0], self.ip[1] };
+        self.ip += 2;
+        return @bitCast(bytes);
+    }
+    inline fn readString(self: *CallFrame) *ObjString {
+        return self.readConst().asString();
+    }
+
+    fn codeIndex(self: *CallFrame) usize {
+        return @intFromPtr(self.ip) - @intFromPtr(self.function.chunk.code.items.ptr);
+    }
+};
 
 const Self = @This();
 pub var vm: Self = undefined;
 
-chunk: ?*Chunk,
-ip: ?[*]u8,
+frames: [FRAMES_MAX]CallFrame,
+frame_count: std.math.IntFittingRange(0, FRAMES_MAX),
+
 stack: [STACK_MAX]Value,
 stack_top: ?[*]Value,
 globals: Table,
@@ -29,8 +62,6 @@ strings: Table,
 objs: ?*Obj,
 
 pub fn init(self: *Self) void {
-    self.chunk = null;
-    self.ip = null;
     self.stack_top = null;
     self.resetStack();
     self.globals = Table.init();
@@ -44,6 +75,7 @@ pub fn deinit(self: *Self) void {
 }
 fn resetStack(self: *Self) void {
     self.stack_top = self.stack[0..];
+    self.frame_count = 0;
 }
 /// If negative, something has gone very wrong.
 fn stackSlotsInUse(self: *Self) i64 {
@@ -53,26 +85,35 @@ fn runtimeError(self: *Self, comptime format: []const u8, args: anytype) void {
     var stderr = std.io.getStdErr().writer();
     stderr.print(format, args) catch {};
     stderr.writeByte('\n') catch {};
-    const instruction = self.codeIndex() - 1;
-    const line = self.chunk.?.getLine(instruction);
-    stderr.print("[line {d}] in script\n", .{line}) catch {};
+
+    var i = self.frame_count;
+    while (i > 0) {
+        i -= 1;
+        const frame = &self.frames[i];
+        const function = frame.function;
+        const instruction = frame.codeIndex() - 1;
+        stderr.print("[line {d}] in ",
+            .{function.chunk.getLine(instruction)}) catch {};
+        if (function.name) |name| {
+            stderr.print("{s}()\n", .{name.chars}) catch {};
+        } else {
+            stderr.print("script\n", .{}) catch {};
+        }
+    }
+
     self.resetStack();
 }
 
 pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
-    var chunk = Chunk.init(loxmem.allocator);
+    const function = compiler.compile(source) orelse {
+        return InterpretError.CompileError;
+    };
 
-    if (!compiler.compile(source, &chunk)) {
-        chunk.deinit();
-        return error.CompileError;
-    }
+    self.push(Value.objVal(ObjFunction, function));
+    const script_call_succeeded = self.call(function, 0);
+    std.debug.assert(script_call_succeeded);
 
-    self.chunk = &chunk;
-    self.ip = chunk.code.items.ptr;
-
-    const result = self.run();
-
-    if (result) |_| {
+    if (self.run()) |_| {
         if (self.stackSlotsInUse() > 0) {
             self.runtimeError(
                 "Internal error: something went wrong, not all stack values were popped. Attempting to dump the stack below:",
@@ -81,24 +122,27 @@ pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
         } else if (self.stackSlotsInUse() < 0) {
             @panic("Popped too many stack values, somehow.");
         }
-    } else |_| {}
-
-    chunk.deinit();
-    return result;
+        return;
+    } else |e| {
+        return e;
+    }
 }
 
 fn run(self: *Self) InterpretError!void {
-    const Op = Chunk.OpCode;
+    var frame: *CallFrame = &self.frames[self.frame_count - 1];
+
     while (true) {
         if (common.DEBUG_TRACE_EXECUTION) {
             self.dumpStack();
-            _ = dbg.disassembleInstruction(self.chunk.?, self.codeIndex());
+            _ = dbg.disassembleInstruction(&frame.function.chunk, frame.codeIndex());
         }
 
-        const instruction = self.readByte();
+        const Op = Chunk.OpCode;
+        const instruction = frame.readByte();
         switch (instruction) {
             Op.constant.int(), Op.constant_long.int() => {
-                const constant: Value = self.readConst();
+                // TODO: y'know, I don't think this actually properly gets the constant for constant_long
+                const constant: Value = frame.readConst();
                 self.push(constant);
             },
             Op.nil.int() => self.push(Value.nilVal()),
@@ -106,7 +150,7 @@ fn run(self: *Self) InterpretError!void {
             Op.false.int() => self.push(Value.boolVal(false)),
             Op.pop.int() => _ = self.pop(),
             Op.popn.int() => {
-                const n = self.readByte();
+                const n = frame.readByte();
                 if (std.debug.runtime_safety and
                     @intFromPtr(self.stack_top) - n < @intFromPtr(&self.stack[0]))
                 {
@@ -115,15 +159,15 @@ fn run(self: *Self) InterpretError!void {
                 self.stack_top.? -= n;
             },
             Op.get_local.int() => {
-                const slot: u8 = self.readByte();
-                self.push(self.stack[slot]);
+                const slot: u8 = frame.readByte();
+                self.push(frame.slots[slot]);
             },
             Op.set_local.int() => {
-                const slot: u8 = self.readByte();
-                self.stack[slot] = self.peek(0).*;
+                const slot: u8 = frame.readByte();
+                frame.slots[slot] = self.peek(0).*;
             },
             Op.get_global.int() => {
-                const name = self.readString();
+                const name = frame.readString();
                 var value: Value = undefined;
                 if (!self.globals.get(name, &value)) {
                     self.runtimeError("Undefined variable '{s}'.", .{name.chars});
@@ -132,12 +176,12 @@ fn run(self: *Self) InterpretError!void {
                 self.push(value);
             },
             Op.define_global.int() => {
-                const name = self.readString();
+                const name = frame.readString();
                 _ = self.globals.set(name, self.peek(0).*);
                 _ = self.pop();
             },
             Op.set_global.int() => {
-                const name = self.readString();
+                const name = frame.readString();
                 if (self.globals.set(name, self.peek(0).*)) {
                     _ = self.globals.delete(name);
                     self.runtimeError("Undefined variable '{s}'.", .{name.chars});
@@ -180,59 +224,58 @@ fn run(self: *Self) InterpretError!void {
                 std.debug.print("\n", .{});
             },
             Op.jump.int() => {
-                const offset: u16 = self.readTwoBytes();
-                self.ip.? += offset;
+                const offset: u16 = frame.readTwoBytes();
+                frame.ip += offset;
             },
             Op.jump_if_false.int() => {
-                const offset: u16 = self.readTwoBytes();
-                if (isFalsey(self.peek(0).*)) self.ip.? += offset;
+                const offset: u16 = frame.readTwoBytes();
+                if (isFalsey(self.peek(0).*)) frame.ip += offset;
             },
             Op.jump_if_false_pop.int() => {
-                const offset: u16 = self.readTwoBytes();
-                if (isFalsey(self.pop())) self.ip.? += offset;
+                const offset: u16 = frame.readTwoBytes();
+                if (isFalsey(self.pop())) frame.ip += offset;
             },
             Op.loop.int() => {
-                const offset: u16 = self.readTwoBytes();
-                self.ip.? -= offset;
+                const offset: u16 = frame.readTwoBytes();
+                frame.ip -= offset;
             },
             Op.case.int() => {
-                const offset: u16 = self.readTwoBytes();
+                const offset: u16 = frame.readTwoBytes();
                 const b = self.pop();
                 if (valuesEqual(self.peek(0).*, b)) {
                     _ = self.pop(); // ^^^^^^^ pop this (the switch value)
                 } else {
-                    self.ip.? += offset; // jump over the case body
+                    frame.ip += offset; // jump over the case body
                 }
             },
+            Op.call.int() => {
+                const arg_count = frame.readByte();
+                if (!self.callValue(self.peek(arg_count).*, arg_count)) {
+                    return InterpretError.RuntimeError;
+                }
+                frame = &self.frames[self.frame_count - 1];
+            },
             Op.@"return".int() => {
-                // Exit interpreter.
-                return;
+                const result: Value = self.pop();
+                self.frame_count -= 1;
+                if (self.frame_count == 0) {
+                    _ = self.pop(); // the script itself
+                    return;
+                }
+
+                self.stack_top = frame.slots;
+                self.push(result);
+                frame = &self.frames[self.frame_count - 1];
             },
             Op.debug.int() => {
-                const len = self.readByte();
-                self.ip.? += len;
+                const len = frame.readByte();
+                frame.ip += len;
             },
             else => {
                 std.debug.panic("unknown opcode {d}", .{instruction});
             },
         }
     }
-}
-inline fn readByte(self: *Self) u8 {
-    const byte = self.ip.?[0];
-    self.ip.? += 1;
-    return byte;
-}
-inline fn readConst(self: *Self) Value {
-    return self.chunk.?.constIdx(self.readByte());
-}
-inline fn readTwoBytes(self: *Self) u16 {
-    const bytes = [2]u8{ self.ip.?[0], self.ip.?[1] };
-    self.ip.? += 2;
-    return @bitCast(bytes);
-}
-inline fn readString(self: *Self) *objects.ObjString {
-    return self.readConst().asString();
 }
 const BinaryOp = enum {
     add,
@@ -294,9 +337,38 @@ fn pop(self: *Self) Value {
     self.stack_top.? -= 1;
     return self.stack_top.?[0];
 }
-inline fn peek(self: *Self, distance: isize) *Value {
+inline fn peek(self: *Self, distance: usize) *Value {
     // Zig doesn't allow negative indices. Sad.
     return &(self.stack_top.? - 1 - distance)[0];
+}
+fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
+    if (callee.isObj()) {
+        switch (callee.objKind()) {
+            .function => return self.call(callee.asFunction(), arg_count),
+            else => {} // Non-callable object type.
+        }
+    }
+    self.runtimeError("Can only call functions and classes.", .{});
+    return false;
+}
+fn call(self: *Self, function: *ObjFunction, arg_count: u8) bool {
+    if (arg_count != function.arity) {
+        self.runtimeError("Expected {d} arguments but got {d}.",
+            .{function.arity, arg_count});
+        return false;
+    }
+
+    if (self.frame_count == FRAMES_MAX) {
+        self.runtimeError("Stack overflow.", .{});
+        return false;
+    }
+
+    var frame = &self.frames[self.frame_count];
+    self.frame_count += 1;
+    frame.function = function;
+    frame.ip = function.chunk.code.items.ptr;
+    frame.slots = self.stack_top.? - arg_count - 1;
+    return true;
 }
 fn isFalsey(value: Value) bool {
     return value.isNil() or (value.isBool() and !value.bool);
@@ -312,7 +384,7 @@ fn concatenate(self: *Self) void {
     @memcpy(chars[a.len()..ab_len], b.chars);
 
     const result = objects.takeString(loxmem.null_terminate(chars));
-    self.push(Value.objVal(objects.ObjString, result));
+    self.push(Value.objVal(ObjString, result));
 }
 
 fn codeIndex(self: *Self) usize {
