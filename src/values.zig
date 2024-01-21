@@ -45,6 +45,9 @@ pub const Value = union(ValueKind) {
     pub inline fn isFunction(self: Value) bool {
         return self.isObjKind(.function);
     }
+    pub inline fn isNative(self: Value) bool {
+        return self.isObjKind(.native);
+    }
     pub inline fn isString(self: Value) bool {
         return self.isObjKind(.string);
     }
@@ -54,6 +57,9 @@ pub const Value = union(ValueKind) {
 
     pub inline fn asFunction(self: Value) *objects.ObjFunction {
         return self.obj.downcast(objects.ObjFunction);
+    }
+    pub inline fn asNative(self: Value) objects.NativeFn {
+        return self.obj.downcast(objects.ObjNative).function;
     }
     pub inline fn asString(self: Value) *objects.ObjString {
         return self.obj.downcast(objects.ObjString);

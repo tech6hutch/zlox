@@ -24,6 +24,7 @@ pub inline fn upcast(comptime T: type, obj: *T) *Obj {
 
 pub const ObjKind = enum {
     function,
+    native,
     string,
 };
 
@@ -32,6 +33,13 @@ pub const ObjFunction = struct {
     arity: u8,
     chunk: Chunk,
     name: ?*ObjString,
+};
+
+pub const NativeFn = *const fn(args: []const Value) Value;
+
+pub const ObjNative = struct {
+    obj: Obj,
+    function: NativeFn,
 };
 
 pub const ObjString = struct {
@@ -69,6 +77,7 @@ pub fn copyString(str: []const u8) *ObjString {
 pub fn printObject(value: Value) void {
     switch (value.objKind()) {
         .function => printFunction(value.obj.downcast(ObjFunction)),
+        .native => std.debug.print("<native fn>", .{}),
         .string => std.debug.print("{s}", .{value.asZigString()}),
     }
 }
@@ -95,6 +104,12 @@ pub fn newFunction() *ObjFunction {
     function.name = null;
     function.chunk = Chunk.init(loxmem.allocator);
     return function;
+}
+
+pub fn newNative(function: NativeFn) *ObjNative {
+    var native: *ObjNative = allocateObj(ObjNative, .native);
+    native.function = function;
+    return native;
 }
 
 /// Uses FNV-1a

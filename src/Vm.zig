@@ -14,6 +14,7 @@ const loxmem = @import("./memory.zig");
 const objects = @import("./objects.zig");
 const Obj = objects.Obj;
 const ObjFunction = objects.ObjFunction;
+const ObjNative = objects.ObjNative;
 const ObjString = objects.ObjString;
 const Table = @import("./Table.zig");
 
@@ -52,6 +53,10 @@ const CallFrame = struct {
 const Self = @This();
 pub var vm: Self = undefined;
 
+fn clockNative(_: []const Value) Value {
+    return Value.numberVal(@as(f64, @floatFromInt(std.time.microTimestamp())) / std.time.us_per_s);
+}
+
 frames: [FRAMES_MAX]CallFrame,
 frame_count: std.math.IntFittingRange(0, FRAMES_MAX),
 
@@ -67,6 +72,8 @@ pub fn init(self: *Self) void {
     self.globals = Table.init();
     self.strings = Table.init();
     self.objs = null;
+
+    self.defineNative("clock", clockNative);
 }
 pub fn deinit(self: *Self) void {
     self.globals.deinit();
@@ -102,6 +109,15 @@ fn runtimeError(self: *Self, comptime format: []const u8, args: anytype) void {
     }
 
     self.resetStack();
+}
+
+fn defineNative(self: *Self, name: []const u8, function: objects.NativeFn) void {
+    // Store them on the stack temporarily so the GC won't think they're unused.
+    self.push(Value.objVal(ObjString, objects.copyString(name)));
+    self.push(Value.objVal(ObjNative, objects.newNative(function)));
+    _ = self.globals.set(self.stack[0].asString(), self.stack[1]);
+    _ = self.pop();
+    _ = self.pop();
 }
 
 pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
@@ -345,6 +361,13 @@ fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
     if (callee.isObj()) {
         switch (callee.objKind()) {
             .function => return self.call(callee.asFunction(), arg_count),
+            .native => {
+                const native = callee.asNative();
+                const result: Value = native((self.stack_top.? - arg_count)[0..arg_count]);
+                self.stack_top.? -= arg_count + 1;
+                self.push(result);
+                return true;
+            },
             else => {} // Non-callable object type.
         }
     }

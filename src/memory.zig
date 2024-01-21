@@ -124,6 +124,9 @@ pub fn freeObject(object: *Obj) void {
             function.chunk.deinit();
             destroy(function);
         },
+        .native => {
+            destroy(object.downcast(objects.ObjNative));
+        },
         .string => {
             const string = object.downcast(objects.ObjString);
             freeArray(string.chars);

@@ -952,5 +952,5 @@ fn and_(_: bool) void {
 }
 
 fn getRule(kind: TokenKind) *const ParseRule {
-    return &rules.get(kind);
+    return rules.getPtrConst(kind);
 }
