@@ -119,6 +119,11 @@ pub fn freeObjects(vm: *Vm) void {
 
 pub fn freeObject(object: *Obj) void {
     switch (object.kind) {
+        .closure => {
+            const closure = object.downcast(objects.ObjClosure);
+            freeArray(closure.upvalues);
+            destroy(closure);
+        },
         .function => {
             const function = object.downcast(objects.ObjFunction);
             function.chunk.deinit();
@@ -131,6 +136,9 @@ pub fn freeObject(object: *Obj) void {
             const string = object.downcast(objects.ObjString);
             freeArray(string.chars);
             destroy(string);
+        },
+        .upvalue => {
+            destroy(object.downcast(objects.ObjUpvalue));
         },
     }
 }

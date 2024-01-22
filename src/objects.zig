@@ -16,21 +16,20 @@ pub const Obj = struct {
 
 pub inline fn upcast(comptime T: type, obj: *T) *Obj {
     return &@field(obj, "obj");
-    // return switch (T) {
-    //     inline else => @field(obj, "obj")
-    //     // else => @compileError("wrong type (or you need to add it)")
-    // };
 }
 
 pub const ObjKind = enum {
+    closure,
     function,
     native,
     string,
+    upvalue,
 };
 
 pub const ObjFunction = struct {
     obj: Obj,
     arity: u8,
+    upvalue_count: u8,
     chunk: Chunk,
     name: ?*ObjString,
 };
@@ -54,6 +53,19 @@ pub const ObjString = struct {
     }
 };
 
+pub const ObjUpvalue = struct {
+    obj: Obj,
+    location: *Value,
+    closed: Value,
+    next: ?*ObjUpvalue,
+};
+
+pub const ObjClosure = struct {
+    obj: Obj,
+    function: *ObjFunction,
+    upvalues: []?*ObjUpvalue,
+};
+
 pub fn takeString(str: [:0]u8) *ObjString {
     const hash = hashString(str);
     const maybe_interned: ?*ObjString = Vm.vm.strings.findString(str, hash);
@@ -74,11 +86,21 @@ pub fn copyString(str: []const u8) *ObjString {
     return allocateString(loxmem.null_terminate(heapChars), hash);
 }
 
+pub fn newUpvalue(slot: *Value) *ObjUpvalue {
+    var upvalue: *ObjUpvalue = allocateObj(ObjUpvalue, .upvalue);
+    upvalue.location = slot;
+    upvalue.closed = Value.nilVal();
+    upvalue.next = null;
+    return upvalue;
+}
+
 pub fn printObject(value: Value) void {
     switch (value.objKind()) {
+        .closure => printFunction(value.asClosure().function),
         .function => printFunction(value.obj.downcast(ObjFunction)),
         .native => std.debug.print("<native fn>", .{}),
         .string => std.debug.print("{s}", .{value.asZigString()}),
+        .upvalue => std.debug.print("upvalue", .{}),
     }
 }
 
@@ -98,9 +120,22 @@ fn allocateString(str: [:0]u8, hash: u32) *ObjString {
     return string;
 }
 
+pub fn newClosure(function: *ObjFunction) *ObjClosure {
+    var upvalues = loxmem.allocate(?*ObjUpvalue, function.upvalue_count);
+    for (0..function.upvalue_count) |i| {
+        upvalues[i] = null;
+    }
+
+    var closure: *ObjClosure = allocateObj(ObjClosure, .closure);
+    closure.function = function;
+    closure.upvalues = upvalues;
+    return closure;
+}
+
 pub fn newFunction() *ObjFunction {
     var function: *ObjFunction = allocateObj(ObjFunction, .function);
     function.arity = 0;
+    function.upvalue_count = 0;
     function.name = null;
     function.chunk = Chunk.init(loxmem.allocator);
     return function;
@@ -122,7 +157,7 @@ fn hashString(key: []const u8) u32 {
     return hash;
 }
 
-fn allocateObj(comptime T: type, objKind: ObjKind) *T {
+fn allocateObj(comptime T: type, comptime objKind: ObjKind) *T {
     return _allocateObject(T, objKind).downcast(T);
 }
 

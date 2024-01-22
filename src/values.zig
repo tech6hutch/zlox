@@ -26,8 +26,8 @@ pub const Value = union(ValueKind) {
     pub fn numberVal(value: f64) Value {
         return .{ .number = value };
     }
-    pub fn objVal(comptime T: type, object: *T) Value {
-        return .{ .obj = objects.upcast(T, object) };
+    pub fn objVal(object: anytype) Value {
+        return .{ .obj = objects.upcast(@TypeOf(object.*), object) };
     }
 
     pub inline fn isBool(self: Value) bool {
@@ -42,6 +42,9 @@ pub const Value = union(ValueKind) {
     pub inline fn isObj(self: Value) bool {
         return self == Value.obj;
     }
+    pub inline fn isClosure(self: Value) bool {
+        return self.isObjKind(.closure);
+    }
     pub inline fn isFunction(self: Value) bool {
         return self.isObjKind(.function);
     }
@@ -55,6 +58,9 @@ pub const Value = union(ValueKind) {
         return self.isObj() and self.objKind() == obj_kind;
     }
 
+    pub inline fn asClosure(self: Value) *objects.ObjClosure {
+        return self.obj.downcast(objects.ObjClosure);
+    }
     pub inline fn asFunction(self: Value) *objects.ObjFunction {
         return self.obj.downcast(objects.ObjFunction);
     }

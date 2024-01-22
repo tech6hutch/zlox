@@ -82,6 +82,13 @@ const Local = struct {
     name: Token,
     // Needs to hold up to 256 and down to -1.
     depth: i16,
+    /// Whether it's captured by a nested function.
+    is_captured: bool,
+};
+
+const Upvalue = struct {
+    index: u8,
+    is_local: bool,
 };
 
 const LoopInfo = struct {
@@ -109,6 +116,7 @@ const Compiler = struct {
     locals: [256]Local,
     // Indicating we have the max 256 locals won't fit in a u8 lol.
     local_count: u9,
+    upvalues: [256]Upvalue,
     // 256 is also a fine limit on nested scopes, IMHO.
     scope_depth: u8,
     innermost_loop: ?*LoopInfo,
@@ -318,6 +326,7 @@ fn initCompiler(compiler: *Compiler, kind: FunctionKind) void {
     var local: *Local = &current.locals[current.local_count];
     current.local_count += 1;
     local.depth = 0;
+    local.is_captured = false;
     local.name.lexeme = "";
 }
 
@@ -340,13 +349,23 @@ fn beginScope() void {
 }
 
 fn endScope() void {
-    current.local_count -= popScopesDownTo(current.scope_depth);
-
     current.scope_depth = std.math.sub(u8, current.scope_depth, 1)
         catch {
             dbg.disassembleChunk(currentChunk(), "code before panic");
             @panic("Tried to end the top-most scope (i.e., an overflow occured in 'current.scope_depth -= 1;').");
         };
+
+    // TODO: ok this really messes with my attempted optimization OP_POPN
+    // current.local_count -= popScopesDownTo(current.scope_depth);
+    while (current.local_count > 0 and
+            current.locals[current.local_count - 1].depth > current.scope_depth) {
+        if (current.locals[current.local_count - 1].is_captured) {
+            emitOp(.close_upvalue);
+        } else {
+            emitOp(.pop);
+        }
+        current.local_count -= 1;
+    }
 }
 
 /// Pops all locals at `scope_depth` and deeper. Returns the number of locals popped.
@@ -443,7 +462,12 @@ fn function(kind: FunctionKind) void {
     block();
 
     const fun = endCompiler();
-    emitBytes(.constant, makeConstant(Value.objVal(ObjFunction, fun)));
+    emitBytes(.closure, makeConstant(Value.objVal(fun)));
+
+    for (compiler.upvalues[0..fun.upvalue_count]) |upvalue| {
+        emitByte(if (upvalue.is_local) 1 else 0);
+        emitByte(upvalue.index);
+    }
 }
 
 fn funDeclaration() void {
@@ -740,17 +764,22 @@ fn or_(_: bool) void {
 }
 
 fn string(_: bool) void {
-    emitConstant(Value.objVal(ObjString, copyString(parser.previous.lexeme[1..parser.previous.lexeme.len-1])));
+    emitConstant(Value.objVal(copyString(parser.previous.lexeme[1..parser.previous.lexeme.len-1])));
 }
 
 fn namedVariable(name: Token, can_assign: bool) void {
+    var arg = resolveLocal(current, &name);
     var get_op: Op = .get_local;
     var set_op: Op = .set_local;
-    var arg = resolveLocal(current, &name);
     if (arg == -1) {
-        arg = identifierConstant(&name);
-        get_op = .get_global;
-        set_op = .set_global;
+        arg = resolveUpvalue(current, &name);
+        get_op = .get_upvalue;
+        set_op = .set_upvalue;
+        if (arg == -1) {
+            arg = identifierConstant(&name);
+            get_op = .get_global;
+            set_op = .set_global;
+        }
     }
 
     if (can_assign and match(.equal)) {
@@ -845,7 +874,7 @@ fn parsePrecedence(precedence: Precedence) void {
 }
 
 fn identifierConstant(name: *const Token) u8 {
-    return makeConstant(Value.objVal(ObjString, copyString(name.lexeme)));
+    return makeConstant(Value.objVal(copyString(name.lexeme)));
 }
 
 fn identifiersEqual(a: *const Token, b: *const Token) bool {
@@ -869,6 +898,48 @@ fn resolveLocal(compiler: *Compiler, name: *const Token) i16 {
     return -1;
 }
 
+fn addUpvalue(compiler: *Compiler, index: u8, is_local: bool) i16 {
+    const upvalue_count = compiler.function.?.upvalue_count;
+
+    for (0..upvalue_count) |i| {
+        const upvalue = &compiler.upvalues[i];
+        if (upvalue.index == index and upvalue.is_local == is_local) {
+            return @intCast(i);
+        }
+    }
+
+    // I think Bob Nystrom's code is wrong here? He checks against the number of
+    // values in a u8 (256), but if we're at the max (and about to add one more),
+    // wouldn't checking for the max u8 (255) be correct?
+    // TODO: test this.
+    if (upvalue_count == std.math.maxInt(u8)) {
+        err("Too many closure variables in function.");
+        return 0;
+    }
+
+    compiler.upvalues[upvalue_count].is_local = is_local;
+    compiler.upvalues[upvalue_count].index = index;
+    compiler.function.?.upvalue_count += 1;
+    return upvalue_count;
+}
+
+fn resolveUpvalue(compiler: *Compiler, name: *const Token) i16 {
+    const enclosing = compiler.enclosing orelse return -1;
+
+    const local = resolveLocal(enclosing, name);
+    if (local != -1) {
+        compiler.enclosing.?.locals[@intCast(local)].is_captured = true;
+        return addUpvalue(compiler, @intCast(local), true);
+    }
+
+    const upvalue = resolveUpvalue(enclosing, name);
+    if (upvalue != -1) {
+        return addUpvalue(compiler, @intCast(upvalue), false);
+    }
+
+    return -1;
+}
+
 fn addLocal(name: Token) void {
     if (current.local_count == current.locals.len) {
         err("Too many local variables in function.");
@@ -879,6 +950,7 @@ fn addLocal(name: Token) void {
     current.local_count += 1;
     local.name = name;
     local.depth = -1;
+    local.is_captured = false;
 }
 
 fn declareVariable() void {

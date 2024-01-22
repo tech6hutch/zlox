@@ -13,16 +13,18 @@ const compiler = @import("./compiler.zig");
 const loxmem = @import("./memory.zig");
 const objects = @import("./objects.zig");
 const Obj = objects.Obj;
+const ObjClosure = objects.ObjClosure;
 const ObjFunction = objects.ObjFunction;
 const ObjNative = objects.ObjNative;
 const ObjString = objects.ObjString;
+const ObjUpvalue = objects.ObjUpvalue;
 const Table = @import("./Table.zig");
 
 const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * 256;
 
 const CallFrame = struct {
-    function: *ObjFunction,
+    closure: *ObjClosure,
     ip: [*]u8,
     slots: [*]Value,
 
@@ -34,7 +36,7 @@ const CallFrame = struct {
         return byte;
     }
     inline fn readConst(self: *CallFrame) Value {
-        return self.function.chunk.constIdx(self.readByte());
+        return self.closure.function.chunk.constIdx(self.readByte());
     }
     inline fn readTwoBytes(self: *CallFrame) u16 {
         const bytes = [2]u8{ self.ip[0], self.ip[1] };
@@ -46,7 +48,7 @@ const CallFrame = struct {
     }
 
     fn codeIndex(self: *CallFrame) usize {
-        return @intFromPtr(self.ip) - @intFromPtr(self.function.chunk.code.items.ptr);
+        return @intFromPtr(self.ip) - @intFromPtr(self.closure.function.chunk.code.items.ptr);
     }
 };
 
@@ -64,6 +66,7 @@ stack: [STACK_MAX]Value,
 stack_top: ?[*]Value,
 globals: Table,
 strings: Table,
+open_upvalues: ?*ObjUpvalue,
 objs: ?*Obj,
 
 pub fn init(self: *Self) void {
@@ -83,6 +86,7 @@ pub fn deinit(self: *Self) void {
 fn resetStack(self: *Self) void {
     self.stack_top = self.stack[0..];
     self.frame_count = 0;
+    self.open_upvalues = null;
 }
 /// If negative, something has gone very wrong.
 fn stackSlotsInUse(self: *Self) i64 {
@@ -97,7 +101,7 @@ fn runtimeError(self: *Self, comptime format: []const u8, args: anytype) void {
     while (i > 0) {
         i -= 1;
         const frame = &self.frames[i];
-        const function = frame.function;
+        const function = frame.closure.function;
         const instruction = frame.codeIndex() - 1;
         stderr.print("[line {d}] in ",
             .{function.chunk.getLine(instruction)}) catch {};
@@ -113,8 +117,8 @@ fn runtimeError(self: *Self, comptime format: []const u8, args: anytype) void {
 
 fn defineNative(self: *Self, name: []const u8, function: objects.NativeFn) void {
     // Store them on the stack temporarily so the GC won't think they're unused.
-    self.push(Value.objVal(ObjString, objects.copyString(name)));
-    self.push(Value.objVal(ObjNative, objects.newNative(function)));
+    self.push(Value.objVal(objects.copyString(name)));
+    self.push(Value.objVal(objects.newNative(function)));
     _ = self.globals.set(self.stack[0].asString(), self.stack[1]);
     _ = self.pop();
     _ = self.pop();
@@ -125,8 +129,11 @@ pub fn interpret(self: *Self, source: [*:0]const u8) InterpretError!void {
         return InterpretError.CompileError;
     };
 
-    self.push(Value.objVal(ObjFunction, function));
-    const script_call_succeeded = self.call(function, 0);
+    self.push(Value.objVal(function));
+    const closure: *ObjClosure = objects.newClosure(function);
+    _ = self.pop();
+    self.push(Value.objVal(closure));
+    const script_call_succeeded = self.call(closure, 0);
     std.debug.assert(script_call_succeeded);
 
     if (self.run()) |_| {
@@ -150,7 +157,7 @@ fn run(self: *Self) InterpretError!void {
     while (true) {
         if (common.DEBUG_TRACE_EXECUTION) {
             self.dumpStack();
-            _ = dbg.disassembleInstruction(&frame.function.chunk, frame.codeIndex());
+            _ = dbg.disassembleInstruction(&frame.closure.function.chunk, frame.codeIndex());
         }
 
         const Op = Chunk.OpCode;
@@ -203,6 +210,14 @@ fn run(self: *Self) InterpretError!void {
                     self.runtimeError("Undefined variable '{s}'.", .{name.chars});
                     return InterpretError.RuntimeError;
                 }
+            },
+            Op.get_upvalue.int() => {
+                const slot = frame.readByte();
+                self.push(frame.closure.upvalues[slot].?.location.*);
+            },
+            Op.set_upvalue.int() => {
+                const slot = frame.readByte();
+                frame.closure.upvalues[slot].?.location.* = self.peek(0).*;
             },
             Op.equal.int() => {
                 const b = self.pop();
@@ -271,8 +286,27 @@ fn run(self: *Self) InterpretError!void {
                 }
                 frame = &self.frames[self.frame_count - 1];
             },
+            Op.closure.int() => {
+                const function: *ObjFunction = frame.readConst().asFunction();
+                const closure: *ObjClosure = objects.newClosure(function);
+                self.push(Value.objVal(closure));
+                for (closure.upvalues) |*upvalue| {
+                    const is_local = frame.readByte();
+                    const index = frame.readByte();
+                    if (is_local != 0) {
+                        upvalue.* = self.captureUpvalue(&frame.slots[index]);
+                    } else {
+                        upvalue.* = frame.closure.upvalues[index];
+                    }
+                }
+            },
+            Op.close_upvalue.int() => {
+                self.closeUpvalues(&(self.stack_top.? - 1)[0]);
+                _ = self.pop();
+            },
             Op.@"return".int() => {
                 const result: Value = self.pop();
+                self.closeUpvalues(&frame.slots[0]);
                 self.frame_count -= 1;
                 if (self.frame_count == 0) {
                     _ = self.pop(); // the script itself
@@ -360,7 +394,7 @@ inline fn peek(self: *Self, distance: usize) *Value {
 fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
     if (callee.isObj()) {
         switch (callee.objKind()) {
-            .function => return self.call(callee.asFunction(), arg_count),
+            .closure => return self.call(callee.asClosure(), arg_count),
             .native => {
                 const native = callee.asNative();
                 const result: Value = native((self.stack_top.? - arg_count)[0..arg_count]);
@@ -374,10 +408,42 @@ fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
     self.runtimeError("Can only call functions and classes.", .{});
     return false;
 }
-fn call(self: *Self, function: *ObjFunction, arg_count: u8) bool {
-    if (arg_count != function.arity) {
+fn captureUpvalue(self: *Self, local: *Value) *ObjUpvalue {
+    var prev_upvalue: ?*ObjUpvalue = null;
+    var upvalue: ?*ObjUpvalue = self.open_upvalues;
+    while (upvalue != null and @intFromPtr(upvalue.?.location) > @intFromPtr(local)) {
+        prev_upvalue = upvalue;
+        upvalue = upvalue.?.next;
+    }
+
+    if (upvalue != null and upvalue.?.location == local) {
+        return upvalue.?;
+    }
+
+    const created_upvalue = objects.newUpvalue(local);
+    created_upvalue.next = upvalue;
+
+    if (prev_upvalue) |prev_upvalue_| {
+        prev_upvalue_.next = created_upvalue;
+    } else {
+        self.open_upvalues = created_upvalue;
+    }
+
+    return created_upvalue;
+}
+fn closeUpvalues(self: *Self, last: *Value) void {
+    while (self.open_upvalues != null and
+            @intFromPtr(self.open_upvalues.?.location) >= @intFromPtr(last)) {
+        var upvalue = self.open_upvalues.?;
+        upvalue.closed = upvalue.location.*;
+        upvalue.location = &upvalue.closed;
+        self.open_upvalues = upvalue.next;
+    }
+}
+fn call(self: *Self, closure: *ObjClosure, arg_count: u8) bool {
+    if (arg_count != closure.function.arity) {
         self.runtimeError("Expected {d} arguments but got {d}.",
-            .{function.arity, arg_count});
+            .{closure.function.arity, arg_count});
         return false;
     }
 
@@ -388,8 +454,8 @@ fn call(self: *Self, function: *ObjFunction, arg_count: u8) bool {
 
     var frame = &self.frames[self.frame_count];
     self.frame_count += 1;
-    frame.function = function;
-    frame.ip = function.chunk.code.items.ptr;
+    frame.closure = closure;
+    frame.ip = closure.function.chunk.code.items.ptr;
     frame.slots = self.stack_top.? - arg_count - 1;
     return true;
 }
@@ -407,7 +473,7 @@ fn concatenate(self: *Self) void {
     @memcpy(chars[a.len()..ab_len], b.chars);
 
     const result = objects.takeString(loxmem.null_terminate(chars));
-    self.push(Value.objVal(ObjString, result));
+    self.push(Value.objVal(result));
 }
 
 fn codeIndex(self: *Self) usize {

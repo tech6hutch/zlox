@@ -135,6 +135,8 @@ pub const OpCode = enum(u8) {
     get_global,
     define_global,
     set_global,
+    get_upvalue,
+    set_upvalue,
     equal,
     greater,
     less,
@@ -151,6 +153,8 @@ pub const OpCode = enum(u8) {
     loop,
     case,
     call,
+    closure,
+    close_upvalue,
     @"return",
     debug,
     pub fn int(comptime self: OpCode) u8 {
