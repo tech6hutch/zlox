@@ -97,6 +97,23 @@ pub fn findString(self: *Table, str: []const u8, hash: u32) ?*ObjString {
     }
 }
 
+pub fn removeWhite(self: *Table) void {
+    if (self.entries) |entries| for (entries) |*entry| {
+        if (entry.key) |key| {
+            if (!key.obj.is_marked) {
+                _ = self.delete(key);
+            }
+        }
+    };
+}
+
+pub fn markTable(self: *Table) void {
+    if (self.entries) |entries| for (entries) |*entry| {
+        loxmem.markObject(objects.upcast_nullable(entry.key));
+        loxmem.markValue(entry.value);
+    };
+}
+
 fn adjustCapacity(self: *Table, new_capacity: usize) void {
     const new_entries: []Entry = loxmem.allocate(Entry, new_capacity);
     for (new_entries) |*entry| {

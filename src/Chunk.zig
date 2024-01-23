@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const values = @import("./values.zig");
 const Value = values.Value;
 const ValueArray = values.Array;
+const Vm = @import("./Vm.zig");
 
 const PACK_LINE_NUMBERS = false;
 const PackedLineNum = if (PACK_LINE_NUMBERS) struct {
@@ -108,7 +109,9 @@ pub inline fn constIdx(self: *Chunk, i: usize) Value {
     return self.constants.items[i];
 }
 pub inline fn addConst(self: *Chunk, value: Value) Allocator.Error!u24 {
+    Vm.vm.push(value);
     try self.constants.append(value);
+    _ = Vm.vm.pop();
     const i = self.constants.items.len - 1;
     const i_u24: u24 = @intCast(i);
     if (i_u24 != i) {

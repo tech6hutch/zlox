@@ -13,6 +13,7 @@ const objects = @import("./objects.zig");
 const ObjString = objects.ObjString;
 const ObjFunction = objects.ObjFunction;
 const copyString = objects.copyString;
+const loxmem = @import("./memory.zig");
 
 const MAX_SWITCH_CASES = 256;
 const MAX_LOOP_BREAKS = 256;
@@ -36,6 +37,14 @@ pub fn compile(source: [*:0]const u8) ?*ObjFunction {
     // Don't use `current` anymore, it's undefined now.
     const fun = endCompiler();
     return if (parser.had_error) null else fun;
+}
+
+pub fn markCompilerRoots() void {
+    var compiler: ?*Compiler = current;
+    while (compiler != null) {
+        loxmem.markObject(objects.upcast_nullable(compiler.?.function));
+        compiler = compiler.?.enclosing;
+    }
 }
 
 const Parser = struct {

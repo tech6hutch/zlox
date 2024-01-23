@@ -1,7 +1,7 @@
 //! Don't move a VM after init'ing it, or its pointer fields will break.
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 const common = @import("./common.zig");
 const dbg = @import("./debug.zig");
 const Chunk = @import("./Chunk.zig");
@@ -67,14 +67,23 @@ stack_top: ?[*]Value,
 globals: Table,
 strings: Table,
 open_upvalues: ?*ObjUpvalue,
-objs: ?*Obj,
+
+bytes_allocated: usize,
+next_gc: usize,
+objs: ?*Obj, // abbr b/c Zig hates shadowing, all my homies hate shadowing
+gray_stack: ArrayList(*Obj),
 
 pub fn init(self: *Self) void {
     self.stack_top = null;
     self.resetStack();
+    self.objs = null;
+    self.bytes_allocated = 0;
+    self.next_gc = 1024 * 1024;
+
+    self.gray_stack = ArrayList(*Obj).init(loxmem.allocator);
+
     self.globals = Table.init();
     self.strings = Table.init();
-    self.objs = null;
 
     self.defineNative("clock", clockNative);
 }
@@ -88,10 +97,12 @@ fn resetStack(self: *Self) void {
     self.frame_count = 0;
     self.open_upvalues = null;
 }
+
 /// If negative, something has gone very wrong.
 fn stackSlotsInUse(self: *Self) i64 {
     return @intCast(@intFromPtr(self.stack_top) - @intFromPtr(&self.stack[0]));
 }
+
 fn runtimeError(self: *Self, comptime format: []const u8, args: anytype) void {
     var stderr = std.io.getStdErr().writer();
     stderr.print(format, args) catch {};
@@ -363,7 +374,7 @@ inline fn binaryOp(
     }
 }
 
-fn dumpStack(self: *Self) void {
+pub fn dumpStack(self: *Self) void {
     std.debug.print("          ", .{});
     var slot: [*]Value = &self.stack;
     while (@intFromPtr(slot) < @intFromPtr(self.stack_top)) : (slot += 1) {
@@ -374,11 +385,11 @@ fn dumpStack(self: *Self) void {
     std.debug.print("\n", .{});
 }
 
-fn push(self: *Self, value: Value) void {
+pub fn push(self: *Self, value: Value) void {
     self.stack_top.?[0] = value;
     self.stack_top.? += 1;
 }
-fn pop(self: *Self) Value {
+pub fn pop(self: *Self) Value {
     if (std.debug.runtime_safety and
         @intFromPtr(self.stack_top) == @intFromPtr(&self.stack[0]))
     {
@@ -463,8 +474,8 @@ fn isFalsey(value: Value) bool {
     return value.isNil() or (value.isBool() and !value.bool);
 }
 fn concatenate(self: *Self) void {
-    const b = self.pop().asString();
-    const a = self.pop().asString();
+    const b = self.peek(0).asString();
+    const a = self.peek(1).asString();
 
     const ab_len = a.len() + b.len();
     // a + b + null
@@ -472,7 +483,9 @@ fn concatenate(self: *Self) void {
     @memcpy(chars[0..a.len()], a.chars);
     @memcpy(chars[a.len()..ab_len], b.chars);
 
-    const result = objects.takeString(loxmem.null_terminate(chars));
+    const result = objects.takeString(loxmem.nullTerminate(chars));
+    _ = self.pop();
+    _ = self.pop();
     self.push(Value.objVal(result));
 }
 

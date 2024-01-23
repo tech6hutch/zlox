@@ -27,7 +27,7 @@ pub const Value = union(ValueKind) {
         return .{ .number = value };
     }
     pub fn objVal(object: anytype) Value {
-        return .{ .obj = objects.upcast(@TypeOf(object.*), object) };
+        return .{ .obj = if (@TypeOf(object.*) == Obj) object else objects.upcast(object) };
     }
 
     pub inline fn isBool(self: Value) bool {

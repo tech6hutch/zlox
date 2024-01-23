@@ -8,14 +8,29 @@ const Chunk = @import("./Chunk.zig");
 
 pub const Obj = struct {
     kind: ObjKind,
+    is_marked: bool,
     next: ?*Obj,
     pub inline fn downcast(self: *Obj, comptime T: type) *T {
         return @fieldParentPtr(T, "obj", self);
     }
 };
 
-pub inline fn upcast(comptime T: type, obj: *T) *Obj {
+pub inline fn upcast(obj: anytype) *Obj {
+    switch (@typeInfo(@TypeOf(obj))) {
+        .Pointer => {},
+        .Optional => @compileError("use upcast_nullable"),
+        else => @compileError("this function expects a pointer")
+    }
     return &@field(obj, "obj");
+}
+
+pub inline fn upcast_nullable(obj: anytype) ?*Obj {
+    switch (@typeInfo(@TypeOf(obj))) {
+        .Optional => {},
+        .Pointer => @compileError("use upcast"),
+        else => @compileError("this function expects a nullable pointer")
+    }
+    return if (obj) |obj_nn| &@field(obj_nn, "obj") else null;
 }
 
 pub const ObjKind = enum {
@@ -47,9 +62,6 @@ pub const ObjString = struct {
     hash: u32,
     pub inline fn len(self: *ObjString) usize {
         return self.chars.len;
-    }
-    pub inline fn cast_into_base(self: *ObjString) *Obj {
-        return self.obj;
     }
 };
 
@@ -83,7 +95,7 @@ pub fn copyString(str: []const u8) *ObjString {
 
     const heapChars = loxmem.allocate(u8, str.len + 1);
     @memcpy(heapChars, str.ptr);
-    return allocateString(loxmem.null_terminate(heapChars), hash);
+    return allocateString(loxmem.nullTerminate(heapChars), hash);
 }
 
 pub fn newUpvalue(slot: *Value) *ObjUpvalue {
@@ -116,7 +128,11 @@ fn allocateString(str: [:0]u8, hash: u32) *ObjString {
     var string: *ObjString = allocateObj(ObjString, .string);
     string.chars = str;
     string.hash = hash;
+
+    Vm.vm.push(Value.objVal(string));
     _ = Vm.vm.strings.set(string, Value.nilVal());
+    _ = Vm.vm.pop();
+
     return string;
 }
 
@@ -162,9 +178,17 @@ fn allocateObj(comptime T: type, comptime objKind: ObjKind) *T {
 }
 
 fn _allocateObject(comptime T: type, objKind: ObjKind) *Obj {
-    var object: *Obj = upcast(T, loxmem.create(T));
+    var object: *Obj = upcast(loxmem.create(T));
     object.kind = objKind;
+    object.is_marked = false;
+
     object.next = Vm.vm.objs;
     Vm.vm.objs = object;
+
+    if (common.DEBUG_LOG_GC) {
+        std.debug.print("{*} allocate {d} for {d} ({s})\n",
+            .{object, @sizeOf(T), @intFromEnum(objKind), @tagName(objKind)});
+    }
+
     return object;
 }

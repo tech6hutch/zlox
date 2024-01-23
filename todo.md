@@ -1,1 +1,2 @@
 - optimize Chunk.getLine (and maybe the place(s) it's used)
+- optimize loxmem.markObject() to skip adding strings & native functions to the gray stack at all since we know they don’t need to be processed. Instead, they could darken from white straight to black

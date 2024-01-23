@@ -3,6 +3,7 @@ const Chunk = @import("./Chunk.zig");
 const Op = Chunk.OpCode;
 const Vm = @import("./Vm.zig");
 const loxmem = @import("./memory.zig");
+const common = @import("./common.zig");
 
 const MAX_FILE_SIZE = 1_000_000;
 
@@ -16,6 +17,7 @@ pub fn main() !void {
     vm = &Vm.vm;
 
     const args = try std.process.argsAlloc(main_allocator);
+    defer std.process.argsFree(main_allocator, args);
     switch (args.len) {
         1 => try repl(),
         2 => try runFile(args[1]),
@@ -27,6 +29,11 @@ pub fn main() !void {
     }
 
     vm.deinit();
+    if (vm.bytes_allocated > 0) {
+        std.debug.print("Leaked {d} bytes of memory\n", .{vm.bytes_allocated});
+    } else if (common.DEBUG_LOG_GC) {
+        std.debug.print("Collected all garbage 🧹\n", .{});
+    }
 }
 
 fn repl() !void {
