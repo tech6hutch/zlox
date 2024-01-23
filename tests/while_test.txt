@@ -1,0 +1,8 @@
+{
+    var x = 5;
+    while (true) {
+        x = x - 1;
+        if (x > 2) continue;
+        break;
+    }
+}
