@@ -34,6 +34,7 @@ pub inline fn upcast_nullable(obj: anytype) ?*Obj {
 }
 
 pub const ObjKind = enum {
+    class,
     closure,
     function,
     native,
@@ -78,6 +79,11 @@ pub const ObjClosure = struct {
     upvalues: []?*ObjUpvalue,
 };
 
+pub const ObjClass = struct {
+    obj: Obj,
+    name: *ObjString,
+};
+
 pub fn takeString(str: [:0]u8) *ObjString {
     const hash = hashString(str);
     const maybe_interned: ?*ObjString = Vm.vm.strings.findString(str, hash);
@@ -108,6 +114,7 @@ pub fn newUpvalue(slot: *Value) *ObjUpvalue {
 
 pub fn printObject(value: Value) void {
     switch (value.objKind()) {
+        .class => std.debug.print("{s}", .{value.asClass().name.chars}),
         .closure => printFunction(value.asClosure().function),
         .function => printFunction(value.obj.downcast(ObjFunction)),
         .native => std.debug.print("<native fn>", .{}),
@@ -134,6 +141,12 @@ fn allocateString(str: [:0]u8, hash: u32) *ObjString {
     _ = Vm.vm.pop();
 
     return string;
+}
+
+pub fn newClass(name: *ObjString) *ObjClass {
+    var class: *ObjClass = allocateObj(ObjClass, .class);
+    class.name = name;
+    return class;
 }
 
 pub fn newClosure(function: *ObjFunction) *ObjClosure {

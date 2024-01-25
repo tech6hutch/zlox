@@ -159,6 +159,7 @@ pub const OpCode = enum(u8) {
     closure,
     close_upvalue,
     @"return",
+    class,
     debug,
     pub fn int(comptime self: OpCode) u8 {
         return @intFromEnum(self);

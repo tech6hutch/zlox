@@ -479,6 +479,18 @@ fn function(kind: FunctionKind) void {
     }
 }
 
+fn classDeclaration() void {
+    consume(.identifier, "Expect class name.");
+    const name_constant = identifierConstant(&parser.previous);
+    declareVariable();
+
+    emitBytes(.class, name_constant);
+    defineVariable(name_constant);
+
+    consume(.left_brace, "Expect '{' before class body.");
+    consume(.right_brace, "Expect '}' after class body.");
+}
+
 fn funDeclaration() void {
     const global = parseVariable("Expect function name.");
     markInitialized(); // allows functions to refer to themselves
@@ -717,7 +729,9 @@ fn synchronize() void {
 }
 
 fn declaration() void {
-    if (match(.fun)) {
+    if (match(.class)) {
+        classDeclaration();
+    } else if (match(.fun)) {
         funDeclaration();
     } else if (match(.@"var")) {
         varDeclaration();

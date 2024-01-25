@@ -42,6 +42,9 @@ pub const Value = union(ValueKind) {
     pub inline fn isObj(self: Value) bool {
         return self == Value.obj;
     }
+    pub inline fn isClass(self: Value) bool {
+        return self.isObjKind(.class);
+    }
     pub inline fn isClosure(self: Value) bool {
         return self.isObjKind(.closure);
     }
@@ -58,6 +61,9 @@ pub const Value = union(ValueKind) {
         return self.isObj() and self.objKind() == obj_kind;
     }
 
+    pub inline fn asClass(self: Value) *objects.ObjClass {
+        return self.obj.downcast(objects.ObjClass);
+    }
     pub inline fn asClosure(self: Value) *objects.ObjClosure {
         return self.obj.downcast(objects.ObjClosure);
     }

@@ -328,6 +328,9 @@ fn run(self: *Self) InterpretError!void {
                 self.push(result);
                 frame = &self.frames[self.frame_count - 1];
             },
+            Op.class.int() => {
+                self.push(Value.objVal(objects.newClass(frame.readString())));
+            },
             Op.debug.int() => {
                 const len = frame.readByte();
                 frame.ip += len;
