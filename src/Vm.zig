@@ -408,6 +408,11 @@ inline fn peek(self: *Self, distance: usize) *Value {
 fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
     if (callee.isObj()) {
         switch (callee.objKind()) {
+            .class => {
+                const class = callee.asClass();
+                (self.stack_top.? - arg_count - 1)[0] = Value.objVal(objects.newInstance(class));
+                return true;
+            },
             .closure => return self.call(callee.asClosure(), arg_count),
             .native => {
                 const native = callee.asNative();

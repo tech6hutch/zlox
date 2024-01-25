@@ -5,6 +5,7 @@ const Value = values.Value;
 const loxmem = @import("./memory.zig");
 const Vm = @import("./Vm.zig");
 const Chunk = @import("./Chunk.zig");
+const Table = @import("./Table.zig");
 
 pub const Obj = struct {
     kind: ObjKind,
@@ -37,6 +38,7 @@ pub const ObjKind = enum {
     class,
     closure,
     function,
+    instance,
     native,
     string,
     upvalue,
@@ -84,6 +86,12 @@ pub const ObjClass = struct {
     name: *ObjString,
 };
 
+pub const ObjInstance = struct {
+    obj: Obj,
+    class: *ObjClass,
+    fields: Table,
+};
+
 pub fn takeString(str: [:0]u8) *ObjString {
     const hash = hashString(str);
     const maybe_interned: ?*ObjString = Vm.vm.strings.findString(str, hash);
@@ -117,6 +125,7 @@ pub fn printObject(value: Value) void {
         .class => std.debug.print("{s}", .{value.asClass().name.chars}),
         .closure => printFunction(value.asClosure().function),
         .function => printFunction(value.obj.downcast(ObjFunction)),
+        .instance => std.debug.print("{s} instance", .{value.asInstance().class.name.chars}),
         .native => std.debug.print("<native fn>", .{}),
         .string => std.debug.print("{s}", .{value.asZigString()}),
         .upvalue => std.debug.print("upvalue", .{}),
@@ -168,6 +177,13 @@ pub fn newFunction() *ObjFunction {
     function.name = null;
     function.chunk = Chunk.init(loxmem.allocator);
     return function;
+}
+
+pub fn newInstance(class: *ObjClass) *ObjInstance {
+    var instance: *ObjInstance = allocateObj(ObjInstance, .instance);
+    instance.class = class;
+    instance.fields = Table.init();
+    return instance;
 }
 
 pub fn newNative(function: NativeFn) *ObjNative {

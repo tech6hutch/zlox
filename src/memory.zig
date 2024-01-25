@@ -103,6 +103,11 @@ fn blackenObject(object: *Obj) void {
             markObject(objects.upcast_nullable(function.name));
             markArray(function.chunk.constants.items);
         },
+        .instance => {
+            const instance = object.downcast(objects.ObjInstance);
+            markObject(objects.upcast(instance.class));
+            instance.fields.markTable();
+        },
         .upvalue => markValue(object.downcast(objects.ObjUpvalue).closed),
         .native,
         .string => {},
@@ -205,6 +210,11 @@ pub fn freeObject(object: *Obj) void {
             const function = object.downcast(objects.ObjFunction);
             function.chunk.deinit();
             destroy(function);
+        },
+        .instance => {
+            const instance = object.downcast(objects.ObjInstance);
+            instance.fields.deinit();
+            destroy(instance);
         },
         .native => {
             destroy(object.downcast(objects.ObjNative));
