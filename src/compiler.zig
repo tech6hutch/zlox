@@ -420,6 +420,18 @@ fn call(_: bool) void {
     emitBytes(.call, arg_count);
 }
 
+fn dot(can_assign: bool) void {
+    consume(.identifier, "Expect property name after '.'.");
+    const name = identifierConstant(&parser.previous);
+
+    if (can_assign and match(.equal)) {
+        expression();
+        emitBytes(.set_property, name);
+    } else {
+        emitBytes(.get_property, name);
+    }
+}
+
 fn literal(_: bool) void {
     switch (parser.previous.kind) {
         .false => emitOp(.false),
@@ -837,7 +849,7 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.left_brace,    ParseRule.init(null,     null,   .none));
     arr.set(.right_brace,   ParseRule.init(null,     null,   .none));
     arr.set(.comma,         ParseRule.init(null,     null,   .none));
-    arr.set(.dot,           ParseRule.init(null,     null,   .none));
+    arr.set(.dot,           ParseRule.init(null,     dot,    .call));
     arr.set(.minus,         ParseRule.init(unary,    binary, .term));
     arr.set(.plus,          ParseRule.init(null,     binary, .term));
     arr.set(.semicolon,     ParseRule.init(null,     null,   .none));

@@ -230,6 +230,36 @@ fn run(self: *Self) InterpretError!void {
                 const slot = frame.readByte();
                 frame.closure.upvalues[slot].?.location.* = self.peek(0).*;
             },
+            Op.get_property.int() => {
+                if (!self.peek(0).isInstance()) {
+                    self.runtimeError("Only instances have properties.", .{});
+                    return InterpretError.RuntimeError;
+                }
+
+                const instance = self.peek(0).asInstance();
+                const name = frame.readString();
+
+                var value: Value = undefined;
+                if (instance.fields.get(name, &value)) {
+                    _ = self.pop(); // instance
+                    self.push(value);
+                } else {
+                    self.runtimeError("Undefined property '{s}'.", .{name.chars});
+                    return InterpretError.RuntimeError;
+                }
+            },
+            Op.set_property.int() => {
+                if (!self.peek(1).isInstance()) {
+                    self.runtimeError("Only instances have fields.", .{});
+                    return InterpretError.RuntimeError;
+                }
+
+                const instance = self.peek(1).asInstance();
+                _ = instance.fields.set(frame.readString(), self.peek(0).*);
+                const value = self.pop();
+                _ = self.pop();
+                self.push(value);
+            },
             Op.equal.int() => {
                 const b = self.pop();
                 const a = self.pop();
