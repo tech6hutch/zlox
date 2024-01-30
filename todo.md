@@ -1,2 +1,7 @@
 - optimize Chunk.getLine (and maybe the place(s) it's used)
 - optimize loxmem.markObject() to skip adding strings & native functions to the gray stack at all since we know they don’t need to be processed. Instead, they could darken from white straight to black
+- I really feel like globals could be bound at compile-time, even in a single-pass compiler. What if globals were implicitly defined (i.e., given a slot) when they're used but haven't been declared yet, and at the end, throw up a compile error if there are any globals not yet declared? You'd just store the line number where the global was used, for use in the error message if it ends up never being declared. So a global can have four states:
+    - (nonexisting; not really a state)
+    - declared (between parsing the `var [identifier]` and the assignment expression, like with locals)
+    - declared and defined
+    - used but not (yet) declared - stores a line number
