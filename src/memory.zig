@@ -116,7 +116,7 @@ fn blackenObject(object: *Obj) void {
 
 pub fn allocate(comptime T: type, count: usize) []T {
     return allocator.alloc(T, count) catch |e| switch (e) {
-        error.OutOfMemory => std.os.exit(1)
+        error.OutOfMemory => std.process.exit(1)
     };
 }
 pub fn freeArray(ptr: anytype) void {
@@ -125,7 +125,7 @@ pub fn freeArray(ptr: anytype) void {
 
 pub fn create(comptime T: type) *T {
     return allocator.create(T) catch |e| switch (e) {
-        error.OutOfMemory => std.os.exit(1)
+        error.OutOfMemory => std.process.exit(1)
     };
 }
 pub fn destroy(ptr: anytype) void {

@@ -12,7 +12,7 @@ pub const Obj = struct {
     is_marked: bool,
     next: ?*Obj,
     pub inline fn downcast(self: *Obj, comptime T: type) *T {
-        return @fieldParentPtr(T, "obj", self);
+        return @fieldParentPtr("obj", self);
     }
 };
 
