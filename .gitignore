@@ -1,5 +1,5 @@
-# zig compiler stuff idk
+# zig compilation cache and builds
 .zig-cache
-.zig-out
+zig-out
 # vim swap files
 **~
