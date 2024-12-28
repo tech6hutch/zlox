@@ -1,0 +1,10 @@
+fun test_switch(a) {
+    switch (a) {
+        case (0) print "0";
+        case (5) print "5";
+        else print "other";
+    }
+}
+
+test_switch(5);
+test_switch(2);
