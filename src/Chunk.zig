@@ -152,6 +152,7 @@ pub const OpCode = enum(u8) {
     not,
     negate,
     print,
+    assert_type,
     jump,
     jump_if_false,
     jump_if_false_pop,

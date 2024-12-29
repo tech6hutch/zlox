@@ -1,0 +1,19 @@
+{
+    var x: float = 4;
+    x = 6;
+    while (x > 0) {
+        x = x - 1;
+    }
+    print("x is ", x);
+
+    fun test() { print("inside"); }
+    var test2: object = test;
+    test();
+    test2();
+}
+
+"Uncomment to see error:";
+"var global_var: float = 4;";
+var global_var = 4;
+global_var = 3;
+print(global_var);

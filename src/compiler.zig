@@ -89,10 +89,19 @@ const ParseRule = struct {
 
 const Local = struct {
     name: Token,
+    static_type: StaticType,
     // Needs to hold up to 256 and down to -1.
     depth: i16,
     /// Whether it's captured by a nested function.
     is_captured: bool,
+};
+
+pub const StaticType = enum(u8) {
+    unknown, bool, float, string, object,
+
+    pub fn fromInt(n: u8) StaticType {
+        return std.meta.intToEnum(StaticType, n) catch .unknown;
+    }
 };
 
 const Upvalue = struct {
@@ -334,6 +343,7 @@ fn initCompiler(compiler: *Compiler, kind: FunctionKind) void {
 
     var local: *Local = &current.locals[current.local_count];
     current.local_count += 1;
+    local.static_type = .unknown;
     local.depth = 0;
     local.is_captured = false;
     local.name.lexeme = "";
@@ -513,8 +523,42 @@ fn funDeclaration() void {
 fn varDeclaration() void {
     const global: u8 = parseVariable("Expect variable name.");
 
+    var var_type = StaticType.unknown;
+    if (match(.colon)) colon_check: {
+        // :StaticTypingNotAllowedOnGlobals
+        // Supporting this robustly would require the compiler to make multiple passes. Currently,
+        // it would only be able to assert their types _after_ they've been declared in the source
+        // code, which is...weird and not ideal, so we just forbid it entirely.
+        if (global != 0) {
+            errorAt(&parser.previous, "Static types on global vars is unsupported.");
+            break :colon_check;
+        }
+        advance();
+        var_type = switch (parser.previous.kind) {
+            .type_bool => .bool,
+            .type_float => .float,
+            .type_string => .string,
+            .type_object => .object,
+            .equal => {
+                errorAtCurrent("Expect a type after a colon. This isn't Go.");
+                break :colon_check;
+            },
+            else => {
+                errorAtCurrent("Expect a type after a colon. That's not a type.");
+                break :colon_check;
+            }
+        };
+    }
+
+    if (global != 0) {
+        current.locals[current.local_count-1].static_type = var_type;
+    }
+
     if (match(.equal)) {
         expression();
+        if (var_type != .unknown) {
+            emitBytes(.assert_type, @intFromEnum(var_type));
+        }
     } else {
         emitOp(.nil);
     }
@@ -819,6 +863,13 @@ fn namedVariable(name: Token, can_assign: bool) void {
 
     if (can_assign and match(.equal)) {
         expression();
+        // :StaticTypingNotAllowedOnGlobals
+        if (arg != -1 and set_op != .set_global) {
+            const var_type = current.locals[@intCast(arg)].static_type;
+            if (var_type != .unknown) {
+                emitBytes(.assert_type, @intFromEnum(var_type));
+            }
+        }
         emitBytes(set_op, @intCast(arg));
     } else {
         emitBytes(get_op, @intCast(arg));
@@ -984,6 +1035,7 @@ fn addLocal(name: Token) void {
     var local: *Local = &current.locals[current.local_count];
     current.local_count += 1;
     local.name = name;
+    local.static_type = .unknown;
     local.depth = -1;
     local.is_captured = false;
 }

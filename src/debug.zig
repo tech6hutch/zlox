@@ -3,6 +3,7 @@ const Chunk = @import("./Chunk.zig");
 const OpCode = Chunk.OpCode;
 const values = @import("./values.zig");
 const printValue = values.print;
+const StaticType = @import("compiler.zig").StaticType;
 
 pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
@@ -39,6 +40,13 @@ pub fn disassembleInstruction(chunk: *Chunk, starting_offset: usize) usize {
         .popn => byteInstruction("OP_POPN", chunk, offset),
         .get_local => byteInstruction("OP_GET_LOCAL", chunk, offset),
         .set_local => byteInstruction("OP_SET_LOCAL", chunk, offset),
+        .assert_type => {
+            const type_num = chunk.idx(offset + 1);
+            const type_name = @tagName(StaticType.fromInt(type_num));
+            std.debug.print("{s:<"++NAME_PADDING_N++"} is {s}\n",
+                .{"OP_ASSERT_TYPE", type_name});
+            return offset + 2;
+        },
         .get_global => constantInstruction("OP_GET_GLOBAL", chunk, offset),
         .define_global => constantInstruction("OP_DEFINE_GLOBAL", chunk, offset),
         .set_global => constantInstruction("OP_SET_GLOBAL", chunk, offset),

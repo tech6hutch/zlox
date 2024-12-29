@@ -10,6 +10,7 @@ const Value = values.Value;
 const printValue = values.print;
 const valuesEqual = values.equal;
 const compiler = @import("./compiler.zig");
+const StaticType = compiler.StaticType;
 const loxmem = @import("./memory.zig");
 const objects = @import("./objects.zig");
 const Obj = objects.Obj;
@@ -59,6 +60,12 @@ fn clockNative(_: []const Value) Value {
     return Value.numberVal(@as(f64, @floatFromInt(std.time.microTimestamp())) / std.time.us_per_s);
 }
 
+fn printNative(vals: []const Value) Value {
+    for (vals) |v| printValue(v);
+    std.debug.print("\n", .{});
+    return Value.nilVal();
+}
+
 frames: [FRAMES_MAX]CallFrame,
 frame_count: std.math.IntFittingRange(0, FRAMES_MAX),
 
@@ -86,6 +93,7 @@ pub fn init(self: *Self) void {
     self.strings = Table.init();
 
     self.defineNative("clock", clockNative);
+    self.defineNative("print", printNative);
 }
 pub fn deinit(self: *Self) void {
     self.globals.deinit();
@@ -199,6 +207,19 @@ fn run(self: *Self) InterpretError!void {
             Op.set_local.int() => {
                 const slot: u8 = frame.readByte();
                 frame.slots[slot] = self.peek(0).*;
+            },
+            Op.assert_type.int() => {
+                const type_num = frame.readByte();
+                const expect_type = std.meta.intToEnum(StaticType, type_num) catch {
+                    self.runtimeError("Unknown static type {d}.", .{type_num});
+                    return InterpretError.RuntimeError;
+                };
+                const actual_type = self.peek(0).*.runtimeType();
+                if (actual_type != expect_type) {
+                    self.runtimeError("Expected a value of type {s} but found {s}.",
+                        .{@tagName(expect_type), @tagName(actual_type)});
+                    return InterpretError.RuntimeError;
+                }
             },
             Op.get_global.int() => {
                 const name = frame.readString();

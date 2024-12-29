@@ -3,6 +3,7 @@ const objects = @import("./objects.zig");
 const Obj = objects.Obj;
 const ObjKind = objects.ObjKind;
 const printObject = objects.printObject;
+const StaticType = @import("compiler.zig").StaticType;
 
 const ValueKind = enum {
     bool,
@@ -91,6 +92,14 @@ pub const Value = union(ValueKind) {
     }
     pub inline fn objKind(self: Value) ObjKind {
         return self.obj.kind;
+    }
+    pub fn runtimeType(self: Value) StaticType {
+        if (self.isNil()) return .unknown;
+        if (self.isBool()) return .bool;
+        if (self.isNumber()) return .float;
+        if (self.isString()) return .string;
+        if (self.isObj()) return .object;
+        unreachable;
     }
 };
 

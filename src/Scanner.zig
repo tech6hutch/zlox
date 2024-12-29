@@ -1,4 +1,5 @@
 const std = @import("std");
+const common = @import("common.zig");
 
 start: [*:0]const u8,
 current: [*:0]const u8,
@@ -57,6 +58,7 @@ pub fn scanToken(self: *Self) Token {
         '>' => self.makeToken(
             if (self.match('=')) .greater_equal else .greater),
         '"' => self.string(),
+        ':' => self.makeToken(.colon),
         else => self.errorToken("Unexpected character.")
     };
 }
@@ -136,7 +138,14 @@ fn checkKeyword(self: *Self, comptime start: usize, comptime length: usize,
 fn identifierKind(self: *Self) TokenKind {
     return switch (self.start[0]) {
         'a' => self.checkKeyword(1, 2, "nd", .@"and"),
-        'b' => self.checkKeyword(1, 4, "reak", .@"break"),
+        'b' =>
+            if (self.currentSlice().len > 1)
+                switch (self.start[1]) {
+                    'o' => self.checkKeyword(2, 2, "ol", .type_bool),
+                    'r' => self.checkKeyword(2, 3, "eak", .@"break"),
+                    else => .identifier
+                }
+            else .identifier,
         'c' =>
             if (self.currentSlice().len > 1)
                 switch (self.start[1]) {
@@ -151,6 +160,7 @@ fn identifierKind(self: *Self) TokenKind {
             if (self.currentSlice().len > 1)
                 switch (self.start[1]) {
                     'a' => self.checkKeyword(2, 3, "lse", .false),
+                    'l' => self.checkKeyword(2, 3, "oat", .type_float),
                     'o' => self.checkKeyword(2, 1, "r", .@"for"),
                     'u' => self.checkKeyword(2, 1, "n", .fun),
                     else => .identifier
@@ -158,12 +168,25 @@ fn identifierKind(self: *Self) TokenKind {
             else .identifier,
         'i' => self.checkKeyword(1, 1, "f", .@"if"),
         'n' => self.checkKeyword(1, 2, "il", .nil),
-        'o' => self.checkKeyword(1, 1, "r", .@"or"),
-        'p' => self.checkKeyword(1, 4, "rint", .print),
+        'o' =>
+            if (self.currentSlice().len > 1)
+                switch (self.start[1]) {
+                    'b' => self.checkKeyword(2, 4, "ject", .type_object),
+                    'r' => self.checkKeyword(2, 0, "", .@"or"),
+                    else => .identifier
+                }
+            else .identifier,
+        'p' =>
+            if (
+                common.USE_PRINT_STMT and
+                self.checkKeyword(1, 4, "rint", .print) == .print
+            ) .print
+            else .identifier,
         'r' => self.checkKeyword(1, 5, "eturn", .@"return"),
         's' =>
             if (self.currentSlice().len > 1)
                 switch (self.start[1]) {
+                    't' => self.checkKeyword(2, 4, "ring", .type_string),
                     'u' => self.checkKeyword(2, 3, "per", .super),
                     'w' => self.checkKeyword(2, 4, "itch", .@"switch"),
                     else => .identifier
@@ -240,6 +263,7 @@ pub const TokenKind = enum {
     // Extensions to Lox.
     @"switch", case,
     @"break", @"continue",
+    colon, type_bool, type_float, type_string, type_object,
 
     err, eof
 };
