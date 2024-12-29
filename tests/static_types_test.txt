@@ -1,3 +1,5 @@
+class Data {}
+
 {
     var x: float = 4;
     x = 6;
@@ -10,6 +12,11 @@
     var test2: object = test;
     test();
     test2();
+
+    var LocalClass: object = Data;
+    var instance: object = LocalClass();
+    instance.datum = "data";
+    print(instance.datum);
 }
 
 "Uncomment to see error:";
