@@ -259,6 +259,7 @@ fn markRoots() void {
 
     Vm.vm.globals.markTable();
     markCompilerRoots();
+    markObject(objects.upcast_nullable(Vm.vm.init_string));
 }
 
 fn traceReferences() void {

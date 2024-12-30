@@ -73,6 +73,7 @@ stack: [STACK_MAX]Value,
 stack_top: ?[*]Value,
 globals: Table,
 strings: Table,
+init_string: ?*ObjString,
 open_upvalues: ?*ObjUpvalue,
 
 bytes_allocated: usize,
@@ -92,12 +93,16 @@ pub fn init(self: *Self) void {
     self.globals = Table.init();
     self.strings = Table.init();
 
+    self.init_string = null; // the GC reads this field, and it may trigger below
+    self.init_string = objects.copyString("init");
+
     self.defineNative("clock", clockNative);
     self.defineNative("print", printNative);
 }
 pub fn deinit(self: *Self) void {
     self.globals.deinit();
     self.strings.deinit();
+    self.init_string = null;
     loxmem.freeObjects(self);
 }
 fn resetStack(self: *Self) void {
@@ -469,6 +474,13 @@ fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
             .class => {
                 const class = callee.asClass();
                 (self.stack_top.? - arg_count - 1)[0] = Value.objVal(objects.newInstance(class));
+                var initializer: Value = undefined;
+                if (class.methods.get(self.init_string.?, &initializer)) {
+                    return self.call(initializer.asClosure(), arg_count);
+                } else if (arg_count != 0) {
+                    self.runtimeError("Expected 0 arguments but got {d}.", .{arg_count});
+                    return false;
+                }
                 return true;
             },
             .closure => return self.call(callee.asClosure(), arg_count),

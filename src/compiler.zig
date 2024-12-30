@@ -121,6 +121,7 @@ const LoopInfo = struct {
 
 const FunctionKind = enum {
     function,
+    initializer,
     method,
     script,
 };
@@ -267,9 +268,14 @@ fn emitJump(instruction: Op) usize {
     return currentChunk().count() - 2;
 }
 
-/// Emits instructions that return nil.
+/// Emits instructions that return the default return value.
 fn emitReturn() void {
-    emitOp(.nil);
+    if (current.?.kind == .initializer) {
+        emitBytes(.get_local, 0);
+    } else {
+        emitOp(.nil);
+    }
+
     emitOp(.@"return");
 }
 
@@ -512,7 +518,12 @@ fn method() void {
     consume(.identifier, "Expect method name.");
     const constant = identifierConstant(&parser.previous);
 
-    function(.method);
+    var kind = FunctionKind.method;
+    if (std.mem.eql(u8, parser.previous.lexeme, "init")) {
+        kind = .initializer;
+    }
+
+    function(kind);
     emitBytes(.method, constant);
 }
 
@@ -713,6 +724,10 @@ fn returnStatement() void {
     if (match(.semicolon)) {
         emitReturn();
     } else {
+        if (current.?.kind == .initializer) {
+            err("Can't return a value from an initializer.");
+        }
+
         expression();
         consume(.semicolon, "Expect ';' after return value.");
         emitOp(.@"return");
