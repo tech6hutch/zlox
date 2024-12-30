@@ -463,6 +463,7 @@ fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
         switch (callee.objKind()) {
             .boundMethod => {
                 const bound = callee.asBoundMethod();
+                (self.stack_top.? - arg_count - 1)[0] = bound.receiver;
                 return self.call(bound.method, arg_count);
             },
             .class => {

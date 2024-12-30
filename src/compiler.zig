@@ -121,6 +121,7 @@ const LoopInfo = struct {
 
 const FunctionKind = enum {
     function,
+    method,
     script,
 };
 
@@ -140,14 +141,19 @@ const Compiler = struct {
     innermost_loop: ?*LoopInfo,
 };
 
+const ClassCompiler = struct {
+    enclosing: ?*ClassCompiler,
+};
+
 var parser = Parser{
     .previous = undefined,
     .current = undefined,
 };
-var current: *Compiler = undefined;
+var current: ?*Compiler = null;
+var current_class: ?*ClassCompiler = null;
 
 fn currentChunk() *Chunk {
-    return &current.function.?.chunk;
+    return &current.?.function.?.chunk;
 }
 
 fn err(message: []const u8) void {
@@ -338,68 +344,69 @@ fn initCompiler(compiler: *Compiler, kind: FunctionKind) void {
     compiler.innermost_loop = null;
     current = compiler;
     if (kind != .script) {
-        current.function.?.name = copyString(parser.previous.lexeme);
+        current.?.function.?.name = copyString(parser.previous.lexeme);
     }
 
-    var local: *Local = &current.locals[current.local_count];
-    current.local_count += 1;
+    var local: *Local = &current.?.locals[current.?.local_count];
+    current.?.local_count += 1;
     local.static_type = .unknown;
     local.depth = 0;
     local.is_captured = false;
-    local.name.lexeme = "";
+    local.name.lexeme =
+        if (kind != .function) "this"
+        else "";
 }
 
 fn endCompiler() *ObjFunction {
     emitReturn();
-    const fun = current.function.?;
+    const fun = current.?.function.?;
 
     if (common.DEBUG_PRINT_CODE and !parser.had_error) {
         dbg.disassembleChunk(currentChunk(),
             if (fun.name) |name| name.chars else "<script>");
     }
 
-    // We never read from this again, it's okay.
-    current = current.enclosing orelse undefined;
+    current = current.?.enclosing;
     return fun;
 }
 
 fn beginScope() void {
-    current.scope_depth += 1;
+    current.?.scope_depth += 1;
 }
 
 fn endScope() void {
-    current.scope_depth = std.math.sub(u8, current.scope_depth, 1)
+    current.?.scope_depth = std.math.sub(u8, current.?.scope_depth, 1)
         catch {
             dbg.disassembleChunk(currentChunk(), "code before panic");
-            @panic("Tried to end the top-most scope (i.e., an overflow occured in 'current.scope_depth -= 1;').");
+            @panic("Tried to end the top-most scope (i.e., an overflow occured in 'current.?.scope_depth -= 1;').");
         };
 
     // TODO: ok this really messes with my attempted optimization OP_POPN
-    // current.local_count -= popScopesDownTo(current.scope_depth);
-    while (current.local_count > 0 and
-            current.locals[current.local_count - 1].depth > current.scope_depth) {
-        if (current.locals[current.local_count - 1].is_captured) {
+    // current.?.local_count -= popScopesDownTo(current.?.scope_depth);
+    while (current.?.local_count > 0 and
+            current.?.locals[current.?.local_count - 1].depth > current.?.scope_depth) {
+        if (current.?.locals[current.?.local_count - 1].is_captured) {
             emitOp(.close_upvalue);
         } else {
             emitOp(.pop);
         }
-        current.local_count -= 1;
+        current.?.local_count -= 1;
     }
 }
 
 /// Pops all locals at `scope_depth` and deeper. Returns the number of locals popped.
 fn popScopesDownTo(scope_depth: u8) u9 {
-    if (std.debug.runtime_safety and current.scope_depth < scope_depth) {
+    if (std.debug.runtime_safety and current.?.scope_depth < scope_depth) {
         std.debug.panic(
             "Tried to pop scopes until depth {d}, but we're already back up to depth {d}",
-            .{scope_depth, current.scope_depth});
+            .{scope_depth, current.?.scope_depth});
     }
 
     var count: u9 = 0;
-    var index: u9 = current.local_count;
+    var index: u9 = current.?.local_count;
     while (index > 0) {
         index -= 1;
-        if (current.locals[index].depth < scope_depth) break;
+        if (current.?.locals[index].depth < scope_depth) break;
         count += 1;
     }
     emitPops(count);
@@ -475,7 +482,7 @@ fn function(kind: FunctionKind) void {
 
     consume(.left_paren, "Expect '(' after function name.");
     if (!check(.right_paren)) {
-        const arity = &current.function.?.arity;
+        const arity = &current.?.function.?.arity;
         while (true) {
             arity.* = std.math.add(u8, arity.*, 1) catch {
                 errorAtCurrent(std.fmt.comptimePrint(
@@ -505,7 +512,7 @@ fn method() void {
     consume(.identifier, "Expect method name.");
     const constant = identifierConstant(&parser.previous);
 
-    function(.function);
+    function(.method);
     emitBytes(.method, constant);
 }
 
@@ -518,6 +525,11 @@ fn classDeclaration() void {
     emitBytes(.class, name_constant);
     defineVariable(name_constant);
 
+    var class_compiler = ClassCompiler {
+        .enclosing = current_class,
+    };
+    current_class = &class_compiler;
+
     namedVariable(class_name, false);
     consume(.left_brace, "Expect '{' before class body.");
     while (!check(.right_brace) and !check(.eof)) {
@@ -525,6 +537,8 @@ fn classDeclaration() void {
     }
     consume(.right_brace, "Expect '}' after class body.");
     emitOp(.pop);
+
+    current_class = current_class.?.enclosing;
 }
 
 fn funDeclaration() void {
@@ -565,7 +579,7 @@ fn varDeclaration() void {
     }
 
     if (global != 0) {
-        current.locals[current.local_count-1].static_type = var_type;
+        current.?.locals[current.?.local_count-1].static_type = var_type;
     }
 
     if (match(.equal)) {
@@ -582,7 +596,7 @@ fn varDeclaration() void {
 }
 
 fn breakStatement() void {
-    if (current.innermost_loop) |loop_info| {
+    if (current.?.innermost_loop) |loop_info| {
         _ = popScopesDownTo(loop_info.scope_depth + 1);
         const break_offset = emitJump(.jump) - loop_info.continue_offset;
         loop_info.break_offsets[loop_info.break_offset_count] =
@@ -599,7 +613,7 @@ fn breakStatement() void {
 }
 
 fn continueStatement() void {
-    if (current.innermost_loop) |loop_info| {
+    if (current.?.innermost_loop) |loop_info| {
         _ = popScopesDownTo(loop_info.scope_depth + 1);
         emitLoop(loop_info.continue_offset);
     } else {
@@ -626,13 +640,13 @@ fn forStatement() void {
     }
 
     var loop_info: LoopInfo = .{
-        .scope_depth = current.scope_depth,
+        .scope_depth = current.?.scope_depth,
         .continue_offset = currentChunk().count(),
         .break_offsets = undefined,
         .break_offset_count = 0,
     };
-    const prev_loop_info = current.innermost_loop;
-    current.innermost_loop = &loop_info;
+    const prev_loop_info = current.?.innermost_loop;
+    current.?.innermost_loop = &loop_info;
 
     var exit_jump: usize = std.math.maxInt(usize);
     if (!match(.semicolon)) {
@@ -659,7 +673,7 @@ fn forStatement() void {
     statement();
     // Jump up to the condition (or the increment if there is one).
     emitLoop(loop_info.continue_offset);
-    current.innermost_loop = prev_loop_info;
+    current.?.innermost_loop = prev_loop_info;
 
     if (exit_jump != std.math.maxInt(usize)) {
         patchJump(exit_jump);
@@ -692,7 +706,7 @@ fn printStatement() void {
 }
 
 fn returnStatement() void {
-    if (current.kind == .script) {
+    if (current.?.kind == .script) {
         err("Can't return from top-level code.");
     }
 
@@ -757,13 +771,13 @@ fn whileStatement() void {
     beginScope(); // for consistency with for loops, even tho we don't declare anything
 
     var loop_info: LoopInfo = .{
-        .scope_depth = current.scope_depth,
+        .scope_depth = current.?.scope_depth,
         .continue_offset = currentChunk().count(),
         .break_offsets = undefined,
         .break_offset_count = 0,
     };
-    const prev_loop_info = current.innermost_loop;
-    current.innermost_loop = &loop_info;
+    const prev_loop_info = current.?.innermost_loop;
+    current.?.innermost_loop = &loop_info;
 
     consume(.left_paren, "Expect '(' after 'while'.");
     expression();
@@ -772,7 +786,7 @@ fn whileStatement() void {
     const exit_jump = emitJump(.jump_if_false_pop);
     statement();
     emitLoop(loop_info.continue_offset);
-    current.innermost_loop = prev_loop_info;
+    current.?.innermost_loop = prev_loop_info;
 
     patchJump(exit_jump);
     patchBreaks(loop_info);
@@ -861,11 +875,11 @@ fn string(_: bool) void {
 }
 
 fn namedVariable(name: Token, can_assign: bool) void {
-    var arg = resolveLocal(current, &name);
+    var arg = resolveLocal(current.?, &name);
     var get_op: Op = .get_local;
     var set_op: Op = .set_local;
     if (arg == -1) {
-        arg = resolveUpvalue(current, &name);
+        arg = resolveUpvalue(current.?, &name);
         get_op = .get_upvalue;
         set_op = .set_upvalue;
         if (arg == -1) {
@@ -879,7 +893,7 @@ fn namedVariable(name: Token, can_assign: bool) void {
         expression();
         // :StaticTypingNotAllowedOnGlobals
         if (arg != -1 and set_op != .set_global) {
-            const var_type = current.locals[@intCast(arg)].static_type;
+            const var_type = current.?.locals[@intCast(arg)].static_type;
             if (var_type != .unknown) {
                 emitBytes(.assert_type, @intFromEnum(var_type));
             }
@@ -892,6 +906,15 @@ fn namedVariable(name: Token, can_assign: bool) void {
 
 fn variable(can_assign: bool) void {
     namedVariable(parser.previous, can_assign);
+}
+
+fn this(_: bool) void {
+    if (current_class == null) {
+        err("Can't use 'this' outside of a class.");
+        return;
+    }
+
+    variable(false);
 }
 
 fn unary(_: bool) void {
@@ -943,7 +966,7 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.print,         ParseRule.init(null,     null,   .none));
     arr.set(.@"return",     ParseRule.init(null,     null,   .none));
     arr.set(.super,         ParseRule.init(null,     null,   .none));
-    arr.set(.this,          ParseRule.init(null,     null,   .none));
+    arr.set(.this,          ParseRule.init(this,     null,   .none));
     arr.set(.true,          ParseRule.init(literal,  null,   .none));
     arr.set(.@"var",        ParseRule.init(null,     null,   .none));
     arr.set(.@"while",      ParseRule.init(null,     null,   .none));
@@ -1041,13 +1064,13 @@ fn resolveUpvalue(compiler: *Compiler, name: *const Token) i16 {
 }
 
 fn addLocal(name: Token) void {
-    if (current.local_count == current.locals.len) {
+    if (current.?.local_count == current.?.locals.len) {
         err("Too many local variables in function.");
         return;
     }
 
-    var local: *Local = &current.locals[current.local_count];
-    current.local_count += 1;
+    var local: *Local = &current.?.locals[current.?.local_count];
+    current.?.local_count += 1;
     local.name = name;
     local.static_type = .unknown;
     local.depth = -1;
@@ -1055,14 +1078,14 @@ fn addLocal(name: Token) void {
 }
 
 fn declareVariable() void {
-    if (current.scope_depth == 0) return;
+    if (current.?.scope_depth == 0) return;
 
     const name: *Token = &parser.previous;
-    var i = current.local_count;
+    var i = current.?.local_count;
     while (i > 0) {
         i += 1;
-        const local: *Local = &current.locals[i];
-        if (local.depth != -1 and local.depth < current.scope_depth) {
+        const local: *Local = &current.?.locals[i];
+        if (local.depth != -1 and local.depth < current.?.scope_depth) {
             break;
         }
 
@@ -1080,18 +1103,18 @@ fn parseVariable(error_message: []const u8) u8 {
     consume(.identifier, error_message);
 
     declareVariable();
-    if (current.scope_depth > 0) return 0;
+    if (current.?.scope_depth > 0) return 0;
 
     return identifierConstant(&parser.previous);
 }
 
 fn markInitialized() void {
-    if (current.scope_depth == 0) return;
-    current.locals[current.local_count - 1].depth = current.scope_depth;
+    if (current.?.scope_depth == 0) return;
+    current.?.locals[current.?.local_count - 1].depth = current.?.scope_depth;
 }
 
 fn defineVariable(global: u8) void {
-    if (current.scope_depth > 0) {
+    if (current.?.scope_depth > 0) {
         markInitialized();
         return;
     }
