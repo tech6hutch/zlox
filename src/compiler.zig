@@ -501,16 +501,30 @@ fn function(kind: FunctionKind) void {
     }
 }
 
+fn method() void {
+    consume(.identifier, "Expect method name.");
+    const constant = identifierConstant(&parser.previous);
+
+    function(.function);
+    emitBytes(.method, constant);
+}
+
 fn classDeclaration() void {
     consume(.identifier, "Expect class name.");
+    const class_name = parser.previous;
     const name_constant = identifierConstant(&parser.previous);
     declareVariable();
 
     emitBytes(.class, name_constant);
     defineVariable(name_constant);
 
+    namedVariable(class_name, false);
     consume(.left_brace, "Expect '{' before class body.");
+    while (!check(.right_brace) and !check(.eof)) {
+        method();
+    }
     consume(.right_brace, "Expect '}' after class body.");
+    emitOp(.pop);
 }
 
 fn funDeclaration() void {

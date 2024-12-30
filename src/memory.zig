@@ -87,9 +87,15 @@ fn blackenObject(object: *Obj) void {
     }
 
     switch (object.kind) {
+        .boundMethod => {
+            const bound = object.downcast(objects.ObjBoundMethod);
+            markValue(bound.receiver);
+            markObject(objects.upcast(bound.method));
+        },
         .class => {
             const class = object.downcast(objects.ObjClass);
             markObject(objects.upcast(class.name));
+            class.methods.markTable();
         },
         .closure => {
             const closure = object.downcast(objects.ObjClosure);
@@ -197,8 +203,12 @@ pub fn freeObject(object: *Obj) void {
     // asserts that the size of the type is the same size that was allocated (and
     // obviously Obj is smaller than anything that "inherits" from it).
     switch (object.kind) {
+        .boundMethod => {
+            destroy(object.downcast(objects.ObjBoundMethod));
+        },
         .class => {
             const class = object.downcast(objects.ObjClass);
+            class.methods.deinit();
             destroy(class);
         },
         .closure => {

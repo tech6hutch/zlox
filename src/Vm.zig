@@ -264,8 +264,7 @@ fn run(self: *Self) InterpretError!void {
                 if (instance.fields.get(name, &value)) {
                     _ = self.pop(); // instance
                     self.push(value);
-                } else {
-                    self.runtimeError("Undefined property '{s}'.", .{name.chars});
+                } else if (!self.bindMethod(instance.class, name)) {
                     return InterpretError.RuntimeError;
                 }
             },
@@ -382,6 +381,9 @@ fn run(self: *Self) InterpretError!void {
             Op.class.int() => {
                 self.push(Value.objVal(objects.newClass(frame.readString())));
             },
+            Op.method.int() => {
+                self.defineMethod(frame.readString());
+            },
             Op.debug.int() => {
                 const len = frame.readByte();
                 frame.ip += len;
@@ -459,6 +461,10 @@ inline fn peek(self: *Self, distance: usize) *Value {
 fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
     if (callee.isObj()) {
         switch (callee.objKind()) {
+            .boundMethod => {
+                const bound = callee.asBoundMethod();
+                return self.call(bound.method, arg_count);
+            },
             .class => {
                 const class = callee.asClass();
                 (self.stack_top.? - arg_count - 1)[0] = Value.objVal(objects.newInstance(class));
@@ -477,6 +483,18 @@ fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
     }
     self.runtimeError("Can only call functions and classes.", .{});
     return false;
+}
+fn bindMethod(self: *Self, class: *objects.ObjClass, name: *ObjString) bool {
+    var method: Value = undefined;
+    if (!class.methods.get(name, &method)) {
+        self.runtimeError("Undefined property '{s}'.", .{name.chars});
+        return false;
+    }
+
+    const bound = objects.newBoundMethod(self.peek(0).*, method.asClosure());
+    _ = self.pop();
+    _ = self.push(Value.objVal(bound));
+    return true;
 }
 fn captureUpvalue(self: *Self, local: *Value) *ObjUpvalue {
     var prev_upvalue: ?*ObjUpvalue = null;
@@ -509,6 +527,12 @@ fn closeUpvalues(self: *Self, last: *Value) void {
         upvalue.location = &upvalue.closed;
         self.open_upvalues = upvalue.next;
     }
+}
+fn defineMethod(self: *Self, name: *ObjString) void {
+    const method = self.peek(0).*;
+    var class = self.peek(1).asClass();
+    _ = class.methods.set(name, method);
+    _ = self.pop();
 }
 fn call(self: *Self, closure: *ObjClosure, arg_count: u8) bool {
     if (arg_count != closure.function.arity) {

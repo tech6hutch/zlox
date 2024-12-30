@@ -35,6 +35,7 @@ pub inline fn upcast_nullable(obj: anytype) ?*Obj {
 }
 
 pub const ObjKind = enum {
+    boundMethod,
     class,
     closure,
     function,
@@ -84,12 +85,19 @@ pub const ObjClosure = struct {
 pub const ObjClass = struct {
     obj: Obj,
     name: *ObjString,
+    methods: Table,
 };
 
 pub const ObjInstance = struct {
     obj: Obj,
     class: *ObjClass,
     fields: Table,
+};
+
+pub const ObjBoundMethod = struct {
+    obj: Obj,
+    receiver: Value,
+    method: *ObjClosure,
 };
 
 pub fn takeString(str: [:0]u8) *ObjString {
@@ -122,6 +130,7 @@ pub fn newUpvalue(slot: *Value) *ObjUpvalue {
 
 pub fn printObject(value: Value) void {
     switch (value.objKind()) {
+        .boundMethod => printFunction(value.asBoundMethod().method.function),
         .class => std.debug.print("{s}", .{value.asClass().name.chars}),
         .closure => printFunction(value.asClosure().function),
         .function => printFunction(value.obj.downcast(ObjFunction)),
@@ -152,9 +161,17 @@ fn allocateString(str: [:0]u8, hash: u32) *ObjString {
     return string;
 }
 
+pub fn newBoundMethod(receiver: Value, method: *ObjClosure) *ObjBoundMethod {
+    var bound = allocateObj(ObjBoundMethod, .boundMethod);
+    bound.receiver = receiver;
+    bound.method = method;
+    return bound;
+}
+
 pub fn newClass(name: *ObjString) *ObjClass {
     var class: *ObjClass = allocateObj(ObjClass, .class);
     class.name = name;
+    class.methods = Table.init();
     return class;
 }
 

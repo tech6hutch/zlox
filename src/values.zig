@@ -43,6 +43,9 @@ pub const Value = union(ValueKind) {
     pub inline fn isObj(self: Value) bool {
         return self == Value.obj;
     }
+    pub inline fn isBoundMethod(self: Value) bool {
+        return self.isObjKind(.boundMethod);
+    }
     pub inline fn isClass(self: Value) bool {
         return self.isObjKind(.class);
     }
@@ -65,6 +68,9 @@ pub const Value = union(ValueKind) {
         return self.isObj() and self.objKind() == obj_kind;
     }
 
+    pub inline fn asBoundMethod(self: Value) *objects.ObjBoundMethod {
+        return self.obj.downcast(objects.ObjBoundMethod);
+    }
     pub inline fn asClass(self: Value) *objects.ObjClass {
         return self.obj.downcast(objects.ObjClass);
     }

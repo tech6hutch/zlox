@@ -90,6 +90,7 @@ pub fn disassembleInstruction(chunk: *Chunk, starting_offset: usize) usize {
         .close_upvalue => simpleInstruction("OP_CLOSE_UPVALUE", offset),
         .@"return" => simpleInstruction("OP_RETURN", offset),
         .class => constantInstruction("OP_CLASS", chunk, offset),
+        .method => constantInstruction("OP_METHOD", chunk, offset),
         .debug => {
             const len = chunk.idx(offset + 1);
             const str = chunk.code.items[offset+2..offset+2+len];
