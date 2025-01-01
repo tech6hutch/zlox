@@ -450,6 +450,10 @@ fn dot(can_assign: bool) void {
     if (can_assign and match(.equal)) {
         expression();
         emitBytes(.set_property, name);
+    } else if (match(.left_paren)) {
+        const arg_count = argumentList();
+        emitBytes(.invoke, name);
+        emitByte(arg_count);
     } else {
         emitBytes(.get_property, name);
     }

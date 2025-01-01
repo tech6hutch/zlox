@@ -1,4 +1,5 @@
 const std = @import("std");
+const print = std.debug.print;
 const Chunk = @import("./Chunk.zig");
 const OpCode = Chunk.OpCode;
 const values = @import("./values.zig");
@@ -6,7 +7,7 @@ const printValue = values.print;
 const StaticType = @import("compiler.zig").StaticType;
 
 pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
-    std.debug.print("== {s} ==\n", .{name});
+    print("== {s} ==\n", .{name});
 
     var offset: usize = 0;
     while (offset < chunk.count()) {
@@ -17,17 +18,17 @@ pub fn disassembleChunk(chunk: *Chunk, name: []const u8) void {
 pub fn disassembleInstruction(chunk: *Chunk, starting_offset: usize) usize {
     var offset = starting_offset;
 
-    std.debug.print("{d:0>4} ", .{offset});
+    print("{d:0>4} ", .{offset});
     const line = chunk.getLine(offset);
     if (offset > 0 and line == chunk.getLine(offset - 1)) {
-        std.debug.print("   | ", .{});
+        print("   | ", .{});
     } else {
-        std.debug.print("{d:>4} ", .{line});
+        print("{d:>4} ", .{line});
     }
 
     const instruction_byte: u8 = chunk.idx(offset);
     const instruction: OpCode = std.meta.intToEnum(OpCode, instruction_byte) catch {
-        std.debug.print("Unknown opcode {d}\n", .{instruction_byte});
+        print("Unknown opcode {d}\n", .{instruction_byte});
         return offset + 1;
     };
     return switch (instruction) {
@@ -43,7 +44,7 @@ pub fn disassembleInstruction(chunk: *Chunk, starting_offset: usize) usize {
         .assert_type => {
             const type_num = chunk.idx(offset + 1);
             const type_name = @tagName(StaticType.fromInt(type_num));
-            std.debug.print("{s:<"++NAME_PADDING_N++"} is {s}\n",
+            print("{s:<"++NAME_PADDING_N++"} is {s}\n",
                 .{"OP_ASSERT_TYPE", type_name});
             return offset + 2;
         },
@@ -70,19 +71,20 @@ pub fn disassembleInstruction(chunk: *Chunk, starting_offset: usize) usize {
         .loop => jumpInstruction("OP_LOOP", -1, chunk, offset),
         .case => jumpInstruction("OP_CASE", 1, chunk, offset),
         .call => byteInstruction("OP_CALL", chunk, offset),
+        .invoke => invokeInstruction("OP_INVOKE", chunk, offset),
         .closure => {
             const constant: u8 = chunk.idx(offset + 1);
             offset += 2;
-            std.debug.print("{s:<"++NAME_PADDING_N++"} {d:>4} ", .{"OP_CLOSURE", constant});
+            print("{s:<"++NAME_PADDING_N++"} {d:>4} ", .{"OP_CLOSURE", constant});
             printValue(chunk.constIdx(constant));
-            std.debug.print("\n", .{});
+            print("\n", .{});
 
             const function = chunk.constIdx(constant).asFunction();
             for (0..function.upvalue_count) |_| {
                 const is_local = chunk.idx(offset);
                 const index = chunk.idx(offset + 1);
                 offset += 2;
-                std.debug.print("{d:0>4}      |     "++NAME_PADDING_S++"{s} {d}\n",
+                print("{d:0>4}      |     "++NAME_PADDING_S++"{s} {d}\n",
                     .{offset - 2, if (is_local != 0) "local" else "upvalue", index});
             }
             return offset;
@@ -94,7 +96,7 @@ pub fn disassembleInstruction(chunk: *Chunk, starting_offset: usize) usize {
         .debug => {
             const len = chunk.idx(offset + 1);
             const str = chunk.code.items[offset+2..offset+2+len];
-            std.debug.print("{s:<"++NAME_PADDING_N++"} // {s}\n", .{"OP_DEBUG", str});
+            print("{s:<"++NAME_PADDING_N++"} // {s}\n", .{"OP_DEBUG", str});
             return offset + 2 + len;
         }
     };
@@ -105,34 +107,43 @@ const NAME_PADDING_N = "20";
 
 fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const constant = chunk.idx(offset + 1);
-    std.debug.print("{s:<"++NAME_PADDING_N++"} {d:>4} '", .{name, constant});
+    print("{s:<"++NAME_PADDING_N++"} {d:>4} '", .{name, constant});
     printValue(chunk.constIdx(constant));
-    std.debug.print("'\n", .{});
+    print("'\n", .{});
     return offset + 2;
 }
 fn constantInstructionLong(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const constant: u24 = @bitCast([3]u8{chunk.idx(offset+1), chunk.idx(offset+2), chunk.idx(offset+3)});
-    std.debug.print("{s:<"++NAME_PADDING_N++"} {d:>4} '", .{name, constant});
+    print("{s:<"++NAME_PADDING_N++"} {d:>4} '", .{name, constant});
     printValue(chunk.constIdx(constant));
-    std.debug.print("'\n", .{});
+    print("'\n", .{});
     return offset + 4;
 }
 
+fn invokeInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
+    const constant = chunk.idx(offset + 1);
+    const arg_count = chunk.idx(offset + 2);
+    print("{s:<"++NAME_PADDING_N++"} ({d} args) {d:>4} '", .{name, arg_count, constant});
+    printValue(chunk.constIdx(constant));
+    print("'\n", .{});
+    return offset + 3;
+}
+
 fn simpleInstruction(name: []const u8, offset: usize) usize {
-    std.debug.print("{s}\n", .{name});
+    print("{s}\n", .{name});
     return offset + 1;
 }
 
 fn byteInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const slot: u8 = chunk.idx(offset + 1);
-    std.debug.print("{s:<"++NAME_PADDING_N++"} {d:>4}\n", .{name, slot});
+    print("{s:<"++NAME_PADDING_N++"} {d:>4}\n", .{name, slot});
     return offset + 2;
 }
 
 fn jumpInstruction(name: []const u8, sign: i2, chunk: *Chunk, offset: usize) usize {
     const jump: u16 = @bitCast([2]u8{chunk.idx(offset+1), chunk.idx(offset+2)});
     const jumpAddr: isize = @as(isize, @intCast(offset)) + 3 + @as(isize, sign) * @as(isize, jump);
-    std.debug.print("{s:<"++NAME_PADDING_N++"} {d:>4} -> {d}\n",
+    print("{s:<"++NAME_PADDING_N++"} {d:>4} -> {d}\n",
         .{name, offset, jumpAddr});
     return offset + 3;
 }

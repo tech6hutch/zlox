@@ -352,6 +352,14 @@ fn run(self: *Self) InterpretError!void {
                 }
                 frame = &self.frames[self.frame_count - 1];
             },
+            Op.invoke.int() => {
+                const method = frame.readString();
+                const arg_count = frame.readByte();
+                if (!self.invoke(method, arg_count)) {
+                    return InterpretError.RuntimeError;
+                }
+                frame = &self.frames[self.frame_count - 1];
+            },
             Op.closure.int() => {
                 const function: *ObjFunction = frame.readConst().asFunction();
                 const closure: *ObjClosure = objects.newClosure(function);
@@ -496,6 +504,31 @@ fn callValue(self: *Self, callee: Value, arg_count: u8) bool {
     }
     self.runtimeError("Can only call functions and classes.", .{});
     return false;
+}
+fn invokeFromClass(self: *Self, class: *objects.ObjClass, name: *ObjString, arg_count: u8) bool {
+    var method: Value = undefined;
+    if (!class.methods.get(name, &method)) {
+        self.runtimeError("Undefined property '{s}'.", .{name.chars});
+        return false;
+    }
+    return self.call(method.asClosure(), arg_count);
+}
+fn invoke(self: *Self, name: *ObjString, arg_count: u8) bool {
+    const receiver = self.peek(arg_count).*;
+    if (!receiver.isInstance()) {
+        self.runtimeError("Only instances have methods.", .{});
+        return false;
+    }
+
+    const instance = receiver.asInstance();
+
+    var value: Value = undefined;
+    if (instance.fields.get(name, &value)) {
+        (self.stack_top.? - arg_count - 1)[0] = value;
+        return self.callValue(value, arg_count);
+    }
+
+    return self.invokeFromClass(instance.class, name, arg_count);
 }
 fn bindMethod(self: *Self, class: *objects.ObjClass, name: *ObjString) bool {
     var method: Value = undefined;
