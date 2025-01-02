@@ -142,6 +142,7 @@ pub const OpCode = enum(u8) {
     set_upvalue,
     get_property,
     set_property,
+    get_super,
     equal,
     greater,
     less,
@@ -164,6 +165,7 @@ pub const OpCode = enum(u8) {
     close_upvalue,
     @"return",
     class,
+    inherit,
     method,
     debug,
     pub fn int(comptime self: OpCode) u8 {

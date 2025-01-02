@@ -285,6 +285,14 @@ fn run(self: *Self) InterpretError!void {
                 _ = self.pop();
                 self.push(value);
             },
+            Op.get_super.int() => {
+                const name = frame.readString();
+                const superclass = self.pop().asClass();
+
+                if (!self.bindMethod(superclass, name)) {
+                    return InterpretError.RuntimeError;
+                }
+            },
             Op.equal.int() => {
                 const b = self.pop();
                 const a = self.pop();
@@ -393,6 +401,17 @@ fn run(self: *Self) InterpretError!void {
             },
             Op.class.int() => {
                 self.push(Value.objVal(objects.newClass(frame.readString())));
+            },
+            Op.inherit.int() => {
+                const superclass = self.peek(1).*;
+                if (!superclass.isClass()) {
+                    self.runtimeError("Superclass must be a class.", .{});
+                    return InterpretError.RuntimeError;
+                }
+                
+                var subclass = self.peek(0).asClass();
+                subclass.methods.addAll(&superclass.asClass().methods);
+                _ = self.pop(); // Subclass.
             },
             Op.method.int() => {
                 self.defineMethod(frame.readString());

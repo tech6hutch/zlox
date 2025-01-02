@@ -69,8 +69,8 @@ pub fn delete(self: *Table, key: *ObjString) bool {
 pub fn addAll(self: *Table, from: *Table) void {
     if (from.entries == null) return;
     for (from.entries.?) |*entry| {
-        if (entry.key != null) {
-            self.set(entry.key, entry.value);
+        if (entry.key) |key| {
+            _ = self.set(key, entry.value);
         }
     }
 }

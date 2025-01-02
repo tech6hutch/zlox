@@ -144,6 +144,7 @@ const Compiler = struct {
 
 const ClassCompiler = struct {
     enclosing: ?*ClassCompiler,
+    has_superclass: bool,
 };
 
 var parser = Parser{
@@ -541,9 +542,26 @@ fn classDeclaration() void {
     defineVariable(name_constant);
 
     var class_compiler = ClassCompiler {
+        .has_superclass = false,
         .enclosing = current_class,
     };
     current_class = &class_compiler;
+
+    if (match(.less)) {
+        consume(.identifier, "Expect superclass name.");
+        variable(false);
+        if (identifiersEqual(&class_name, &parser.previous)) {
+            err("A class can't inherit from itself.");
+        }
+
+        beginScope();
+        addLocal(syntheticToken("super"));
+        defineVariable(0);
+
+        namedVariable(class_name, false);
+        emitOp(.inherit);
+        class_compiler.has_superclass = true;
+    }
 
     namedVariable(class_name, false);
     consume(.left_brace, "Expect '{' before class body.");
@@ -552,6 +570,10 @@ fn classDeclaration() void {
     }
     consume(.right_brace, "Expect '}' after class body.");
     emitOp(.pop);
+
+    if (class_compiler.has_superclass) {
+        endScope();
+    }
 
     current_class = current_class.?.enclosing;
 }
@@ -927,6 +949,32 @@ fn variable(can_assign: bool) void {
     namedVariable(parser.previous, can_assign);
 }
 
+fn syntheticToken(text: []const u8) Token {
+    var token: Token = .{
+        .lexeme = text,
+        .kind = undefined,
+        .line = 0,
+    };
+    token.line = ~token.line;
+    return token;
+}
+
+fn super(_: bool) void {
+    if (current_class == null) {
+        err("Can't use 'super' outside of a class.");
+    } else if (!current_class.?.has_superclass) {
+        err("Can't use 'super' in a class with no superclass.");
+    }
+
+    consume(.dot, "Expect '.' after 'super'.");
+    consume(.identifier, "Expect superclass method name.");
+    const name = identifierConstant(&parser.previous);
+
+    namedVariable(syntheticToken("this"), false);
+    namedVariable(syntheticToken("super"), false);
+    emitBytes(.get_super, name);
+}
+
 fn this(_: bool) void {
     if (current_class == null) {
         err("Can't use 'this' outside of a class.");
@@ -984,7 +1032,7 @@ const rules: EnumArray(TokenKind, ParseRule) = def: {
     arr.set(.@"or",         ParseRule.init(null,     or_,    .@"or"));
     arr.set(.print,         ParseRule.init(null,     null,   .none));
     arr.set(.@"return",     ParseRule.init(null,     null,   .none));
-    arr.set(.super,         ParseRule.init(null,     null,   .none));
+    arr.set(.super,         ParseRule.init(super,     null,   .none));
     arr.set(.this,          ParseRule.init(this,     null,   .none));
     arr.set(.true,          ParseRule.init(literal,  null,   .none));
     arr.set(.@"var",        ParseRule.init(null,     null,   .none));

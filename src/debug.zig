@@ -55,6 +55,7 @@ pub fn disassembleInstruction(chunk: *Chunk, starting_offset: usize) usize {
         .set_upvalue => byteInstruction("OP_SET_UPVALUE", chunk, offset),
         .get_property => constantInstruction("OP_GET_PROPERTY", chunk, offset),
         .set_property => constantInstruction("OP_SET_PROPERTY", chunk, offset),
+        .get_super => constantInstruction("OP_GET_SUPER", chunk, offset),
         .equal => simpleInstruction("OP_EQUAL", offset),
         .greater => simpleInstruction("OP_GREATER", offset),
         .less => simpleInstruction("OP_LESS", offset),
@@ -92,6 +93,7 @@ pub fn disassembleInstruction(chunk: *Chunk, starting_offset: usize) usize {
         .close_upvalue => simpleInstruction("OP_CLOSE_UPVALUE", offset),
         .@"return" => simpleInstruction("OP_RETURN", offset),
         .class => constantInstruction("OP_CLASS", chunk, offset),
+        .inherit => simpleInstruction("OP_INHERIT", offset),
         .method => constantInstruction("OP_METHOD", chunk, offset),
         .debug => {
             const len = chunk.idx(offset + 1);
