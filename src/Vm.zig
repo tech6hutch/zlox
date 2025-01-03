@@ -368,6 +368,15 @@ fn run(self: *Self) InterpretError!void {
                 }
                 frame = &self.frames[self.frame_count - 1];
             },
+            Op.super_invoke.int() => {
+                const method = frame.readString();
+                const arg_count = frame.readByte();
+                const superclass = self.pop().asClass();
+                if (!self.invokeFromClass(superclass, method, arg_count)) {
+                    return InterpretError.RuntimeError;
+                }
+                frame = &self.frames[self.frame_count - 1];
+            },
             Op.closure.int() => {
                 const function: *ObjFunction = frame.readConst().asFunction();
                 const closure: *ObjClosure = objects.newClosure(function);

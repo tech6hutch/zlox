@@ -971,8 +971,15 @@ fn super(_: bool) void {
     const name = identifierConstant(&parser.previous);
 
     namedVariable(syntheticToken("this"), false);
-    namedVariable(syntheticToken("super"), false);
-    emitBytes(.get_super, name);
+    if (match(.left_paren)) {
+        const arg_count = argumentList();
+        namedVariable(syntheticToken("super"), false);
+        emitBytes(.super_invoke, name);
+        emitByte(arg_count);
+    } else {
+        namedVariable(syntheticToken("super"), false);
+        emitBytes(.get_super, name);
+    }
 }
 
 fn this(_: bool) void {

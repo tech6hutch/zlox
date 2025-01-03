@@ -161,6 +161,7 @@ pub const OpCode = enum(u8) {
     case,
     call,
     invoke,
+    super_invoke,
     closure,
     close_upvalue,
     @"return",

@@ -73,6 +73,7 @@ pub fn disassembleInstruction(chunk: *Chunk, starting_offset: usize) usize {
         .case => jumpInstruction("OP_CASE", 1, chunk, offset),
         .call => byteInstruction("OP_CALL", chunk, offset),
         .invoke => invokeInstruction("OP_INVOKE", chunk, offset),
+        .super_invoke => invokeInstruction("OP_SUPER_INVOKE", chunk, offset),
         .closure => {
             const constant: u8 = chunk.idx(offset + 1);
             offset += 2;
